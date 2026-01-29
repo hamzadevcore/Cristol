@@ -31,7 +31,7 @@ EPISODES_DIR = DATA_DIR / 'episodes'
 ARCHIVE_DIR = DATA_DIR / 'archive'
 LORE_FILE = DATA_DIR / 'lore.md'
 PROFILE_FILE = DATA_DIR / 'profile.md'
-HISTORY_FILE = DATA_DIR / 'history.md'  # <-- NEW: Campaign History
+HISTORY_FILE = DATA_DIR / 'history.md'
 
 # Ensure directories exist
 for d in [DATA_DIR, EPISODES_DIR, ARCHIVE_DIR]:
@@ -101,7 +101,7 @@ def build_system_prompt(episode, lore, profile):
     # Load and inject campaign history
     if HISTORY_FILE.exists():
         history_content = HISTORY_FILE.read_text().strip()
-        if len(history_content) > 20:  # arbitrary check to ensure it has real content
+        if len(history_content) > 20:
             parts.append(f"\n=== PREVIOUS CAMPAIGN EVENTS ===\n{history_content}")
 
     if profile:
@@ -152,6 +152,31 @@ def create_episode():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/episodes/<id>', methods=['PUT'])
+def update_episode(id):
+    path = EPISODES_DIR / f"{id}.json"
+    if not path.exists():
+        return jsonify({"error": "Not found"}), 404
+
+    data = request.json
+    try:
+        # Load existing to preserve any other fields if they exist
+        with open(path, 'r') as f:
+            current_data = json.load(f)
+
+        # Update fields
+        current_data['name'] = data.get('name', current_data.get('name'))
+        current_data['description'] = data.get('description', current_data.get('description'))
+        current_data['context'] = data.get('context', current_data.get('context'))
+
+        with open(path, 'w') as f:
+            json.dump(current_data, f, indent=2)
+
+        return jsonify(current_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/episodes/<id>', methods=['DELETE'])
 def delete_episode(id):
     path = EPISODES_DIR / f"{id}.json"
@@ -173,7 +198,6 @@ def chat():
     lore = data.get('lore', '')
     profile = data.get('profile', '')
 
-    # This now includes the History File content
     system_prompt = build_system_prompt(episode, lore, profile)
 
     full_prompt = ""
@@ -227,7 +251,6 @@ def finish_episode():
         summary_parts.append(token)
     summary = "".join(summary_parts)
 
-    # Create Archive Entry (JSON)
     archive_id = str(int(time.time()))
     archive_data = {
         "id": archive_id,
@@ -240,7 +263,6 @@ def finish_episode():
     with open(ARCHIVE_DIR / f"{archive_id}.json", "w") as f:
         json.dump(archive_data, f, indent=2)
 
-    # NEW: Append to Campaign History (Markdown)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     history_entry = f"\n\n## Episode: {data.get('episodeName', 'Unknown')} ({timestamp})\n{summary}"
 

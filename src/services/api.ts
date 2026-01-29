@@ -28,17 +28,17 @@ export interface ArchivedSession {
   archivedAt: string;
 }
 
-export interface FinishEpisodeResponse {
-  id: string; // <-- Added this
-  summary: string;
-  archivedAt: string; // <-- Added this
-  episodeName: string; // <-- Added this
-  // The backend returns the whole object, so we can access these
+export interface FinishEpisodeRequest {
+  episodeName: string;
+  messages: Array<{ role: 'user' | 'ai'; content: string }>;
+  model: string;
 }
 
 export interface FinishEpisodeResponse {
+  id: string;
   summary: string;
-  archived: boolean;
+  archivedAt: string;
+  episodeName: string;
 }
 
 class APIService {
@@ -109,6 +109,16 @@ class APIService {
     return response.json();
   }
 
+  async updateEpisode(id: string, data: Partial<Episode>): Promise<Episode> {
+    const response = await fetch(`${API_BASE}/episodes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to update episode');
+    return response.json();
+  }
+
   async deleteEpisode(id: string): Promise<void> {
     const response = await fetch(`${API_BASE}/episodes/${id}`, {
       method: 'DELETE',
@@ -116,6 +126,7 @@ class APIService {
     if (!response.ok) throw new Error('Failed to delete episode');
   }
 
+  asyncwb_THOUGHT
   async getArchive(): Promise<ArchivedSession[]> {
     try {
       const response = await fetch(`${API_BASE}/archive`);

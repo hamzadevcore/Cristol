@@ -49,6 +49,7 @@ type Action =
   | { type: 'LOAD_STATE'; payload: AppState }
   | { type: 'SET_EPISODES'; payload: Episode[] }
   | { type: 'ADD_EPISODE'; payload: Episode }
+  | { type: 'UPDATE_EPISODE'; payload: Episode }
   | { type: 'REMOVE_EPISODE'; payload: string };
 
 function appReducer(state: AppState, action: Action): AppState {
@@ -75,6 +76,12 @@ function appReducer(state: AppState, action: Action): AppState {
     case 'SET_MESSAGES': return { ...state, messages: action.payload };
     case 'SET_EPISODES': return { ...state, episodes: action.payload };
     case 'ADD_EPISODE': return { ...state, episodes: [...state.episodes, action.payload] };
+    case 'UPDATE_EPISODE': {
+      const updatedEpisodes = state.episodes.map(e => e.id === action.payload.id ? action.payload : e);
+      // If the currently playing episode is the one we updated, update it live
+      const currentEpisode = state.currentEpisode?.id === action.payload.id ? action.payload : state.currentEpisode;
+      return { ...state, episodes: updatedEpisodes, currentEpisode };
+    }
     case 'REMOVE_EPISODE': return { ...state, episodes: state.episodes.filter(e => e.id !== action.payload) };
     default: return state;
   }
@@ -93,13 +100,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          // FIX: Only load Client-side state, ignore Server-side state (episodes, lore) from cache
           const { episodes, lore, profile, archive, ...clientState } = parsed;
           dispatch({ type: 'LOAD_STATE', payload: { ...initialState, ...clientState } });
         } catch (e) { console.error(e); }
       }
 
-      // 2. Load Server State from Backend (Episodes, Lore, Profile) - This is the Source of Truth
+      // 2. Load Server State from Backend (Episodes, Lore, Profile)
       try {
         const episodes = await api.getEpisodes();
         dispatch({ type: 'SET_EPISODES', payload: episodes });
@@ -111,9 +117,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'UPDATE_PROFILE', payload: profile });
 
         const archive = await api.getArchive();
-        // For archive, we trust the backend over local, but we can set it here
-        // Note: We don't dispatch SET_ARCHIVE here because we didn't make a specific action for bulk set
-        // but typically you'd want to sync this too.
       } catch (e) { console.error("Backend sync failed", e); }
     };
     init();
@@ -121,15 +124,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Save to Storage
   useEffect(() => {
-    // FIX: Don't save 'episodes', 'lore', or 'profile' to localStorage.
-    // They live in the backend files. We only save 'settings' and 'messages'.
     const stateToSave = {
       messages: state.messages,
       currentEpisode: state.currentEpisode,
       settings: state.settings,
       activePanel: state.activePanel,
       tokenUsage: state.tokenUsage
-      // We explicitly exclude episodes, lore, profile, archive
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
   }, [state.messages, state.currentEpisode, state.settings, state.activePanel, state.tokenUsage]);

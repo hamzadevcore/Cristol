@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { api } from '../services/api';
+import { api, Episode } from '../services/api';
 import { cn } from '../utils/cn';
 import { CreateEpisodeModal } from './CreateEpisodeModal';
+import { EditEpisodeModal } from './EditEpisodeModal';
 
 export function Sidebar() {
   const { state, dispatch } = useApp();
@@ -10,7 +11,9 @@ export function Sidebar() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [tempLore, setTempLore] = useState(state.lore);
   const [tempProfile, setTempProfile] = useState(state.profile);
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingEpisode, setEditingEpisode] = useState<Episode | null>(null);
 
   const accentColor = {
     purple: 'border-purple-500 text-purple-400 bg-purple-500/10',
@@ -30,6 +33,11 @@ export function Sidebar() {
     }
   };
 
+  const handleEditClick = (e: React.MouseEvent, episode: Episode) => {
+    e.stopPropagation();
+    setEditingEpisode(episode);
+  };
+
   const panels = [
     { id: 'episodes', label: '◈ EPISODES' },
     { id: 'archive', label: '◈ ARCHIVE' },
@@ -40,6 +48,14 @@ export function Sidebar() {
   return (
     <div className="w-72 h-full bg-gray-950/80 border-r-2 border-gray-700 flex flex-col overflow-hidden">
       <CreateEpisodeModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
+
+      {editingEpisode && (
+        <EditEpisodeModal
+          isOpen={true}
+          onClose={() => setEditingEpisode(null)}
+          episode={editingEpisode}
+        />
+      )}
 
       {/* Header */}
       <div className={cn("p-4 border-b-2 border-gray-700", accentColor)}>
@@ -85,15 +101,26 @@ export function Sidebar() {
                   state.currentEpisode?.id === episode.id ? accentColor : "border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 )}
               >
-                <div className="font-bold text-sm pr-6">{episode.name}</div>
+                <div className="font-bold text-sm pr-12">{episode.name}</div>
                 <div className="text-xs opacity-60 mt-1 line-clamp-2">{episode.description}</div>
-                <button
-                  onClick={(e) => handleDeleteEpisode(e, episode.id)}
-                  className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-opacity"
-                  title="Delete"
-                >
-                  ✕
-                </button>
+
+                {/* Actions */}
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => handleEditClick(e, episode)}
+                    className="text-gray-500 hover:text-white"
+                    title="Edit"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    onClick={(e) => handleDeleteEpisode(e, episode.id)}
+                    className="text-red-500 hover:text-red-300"
+                    title="Delete"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             ))}
           </div>
