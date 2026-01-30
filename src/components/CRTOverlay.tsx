@@ -7,67 +7,63 @@ export function CRTOverlay() {
   if (!crtEffects) return null;
 
   return (
-    <>
+    <div className="pointer-events-none absolute inset-0 z-50 rounded-[inherit] overflow-hidden">
       {/* Scanlines */}
       {scanlines && (
         <div
-          className="pointer-events-none fixed inset-0 z-50"
+          className="absolute inset-0 z-50"
           style={{
             background: `repeating-linear-gradient(
               0deg,
               transparent,
               transparent 2px,
-              rgba(0, 0, 0, 0.15) 2px,
-              rgba(0, 0, 0, 0.15) 4px
+              rgba(0, 0, 0, 0.3) 2px,
+              rgba(0, 0, 0, 0.3) 4px
             )`,
+            backgroundSize: '100% 4px'
           }}
         />
       )}
-      
-      {/* CRT vignette and glow */}
+
+      {/* Vignette */}
       <div
-        className="pointer-events-none fixed inset-0 z-50"
+        className="absolute inset-0 z-50"
         style={{
           background: `radial-gradient(
-            ellipse at center,
-            transparent 0%,
-            transparent 60%,
+            circle at center,
+            transparent 50%,
             rgba(0, 0, 0, 0.4) 100%
           )`,
         }}
       />
 
-      {/* Screen flicker */}
+      {/* Screen flicker (Safe opacity) */}
       {flickerEnabled && (
         <div
-          className="pointer-events-none fixed inset-0 z-50 animate-flicker opacity-[0.02]"
-          style={{ background: 'white' }}
+          className="absolute inset-0 z-50 animate-flicker-overlay"
+          style={{ background: 'rgba(255, 255, 255, 0.02)' }}
         />
       )}
 
-      {/* Fishbowl curvature overlay */}
+      {/* Fishbowl curvature shadow */}
       {fishbowlIntensity > 0 && (
         <div
-          className="pointer-events-none fixed inset-0 z-40"
+          className="absolute inset-0 z-40"
           style={{
-            boxShadow: `inset 0 0 ${100 * fishbowlIntensity}px ${50 * fishbowlIntensity}px rgba(0, 0, 0, 0.5)`,
-            borderRadius: `${20 * fishbowlIntensity}%`,
+            boxShadow: `inset 0 0 ${100 * fishbowlIntensity}px rgba(0, 0, 0, 0.9)`,
           }}
         />
       )}
 
-      {/* RGB split effect on edges */}
+      {/* RGB split edge effect */}
       <div
-        className="pointer-events-none fixed inset-0 z-50 opacity-30"
+        className="absolute inset-0 z-50 opacity-10"
         style={{
           background: `
-            linear-gradient(90deg, rgba(255, 0, 0, 0.1) 0%, transparent 3%, transparent 97%, rgba(0, 0, 255, 0.1) 100%)
+            linear-gradient(90deg, rgba(255, 0, 0, 0.2) 0%, transparent 2%, transparent 98%, rgba(0, 0, 255, 0.2) 100%)
           `,
         }}
       />
-
-      {/* VHS tracking lines - subtle */}
-      <div className="pointer-events-none fixed inset-0 z-50 animate-vhs-tracking opacity-[0.03]" />
-    </>
+    </div>
   );
 }
