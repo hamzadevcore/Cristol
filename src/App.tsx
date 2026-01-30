@@ -7,51 +7,61 @@ import { ChatArea } from './components/ChatArea';
 import { Footer } from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
 import { FinishEpisodeModal } from './components/FinishEpisodeModal';
+import { EditShowModal } from './components/EditShowModal';
 import { cn } from './utils/cn';
 
 function AppContent() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [finishEpisodeOpen, setFinishEpisodeOpen] = useState(false);
 
-  // Fishbowl transform for the whole app
-  const fishbowlStyle = state.settings.crtEffects && state.settings.fishbowlIntensity > 0
-    ? {
-        transform: `perspective(1000px) rotateX(${state.settings.fishbowlIntensity * 2}deg)`,
-        borderRadius: `${state.settings.fishbowlIntensity * 30}px`,
-      }
-    : {};
+  // Logic: 3D only active if Master Switch (crtEffects) is ON AND Perspective Switch is ON
+  const is3DActive = state.settings.crtEffects && state.settings.enablePerspective;
+  const intensity = is3DActive ? state.settings.fishbowlIntensity : 0;
+
+  const containerStyle = {
+    '--tilt-x': is3DActive ? '2deg' : '0deg',
+    '--curve': is3DActive ? `${intensity * 200}px` : '0px',
+    '--scale': is3DActive ? 0.96 : 1,
+  } as React.CSSProperties;
 
   return (
     <div
-      className={cn(
-        "h-screen w-screen overflow-hidden font-mono",
-        "bg-gray-950 text-gray-300",
-        state.settings.crtEffects && "crt-glow"
-      )}
-      style={fishbowlStyle}
+        className={cn(
+          "perspective-container bg-black",
+          !is3DActive && "overflow-hidden" // Remove scrollbars if flat
+        )}
+        data-theme={state.settings.colorTheme}
+        data-vfx={state.settings.crtEffects ? "enabled" : "disabled"}
     >
-      {/* CRT Effects Overlay */}
-      <CRTOverlay />
+        <div
+            className="crt-monitor flex flex-col overflow-hidden"
+            style={containerStyle}
+        >
+            <CRTOverlay />
 
-      {/* Main Layout */}
-      <div className="h-full flex flex-col">
-        <Header
-          onOpenSettings={() => setSettingsOpen(true)}
-          onFinishEpisode={() => setFinishEpisodeOpen(true)}
-        />
+            {state.settings.crtEffects && <div className="monitor-glare" />}
 
-        <div className="flex-1 flex overflow-hidden">
-          <Sidebar />
-          <ChatArea />
+            <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+            <FinishEpisodeModal isOpen={finishEpisodeOpen} onClose={() => setFinishEpisodeOpen(false)} />
+
+            <Header onOpenSettings={() => setSettingsOpen(true)} onFinishEpisode={() => setFinishEpisodeOpen(true)} />
+
+            <div className="flex-1 flex overflow-hidden relative z-10">
+                <Sidebar />
+                <ChatArea />
+
+                {state.editingShow !== undefined && (
+                   <EditShowModal
+                      isOpen={true}
+                      onClose={() => dispatch({ type: 'SET_EDITING_SHOW', payload: undefined })}
+                      show={state.editingShow}
+                   />
+                )}
+            </div>
+
+            <Footer />
         </div>
-
-        <Footer />
-      </div>
-
-      {/* Modals */}
-      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <FinishEpisodeModal isOpen={finishEpisodeOpen} onClose={() => setFinishEpisodeOpen(false)} />
     </div>
   );
 }
