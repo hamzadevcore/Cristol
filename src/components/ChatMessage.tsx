@@ -11,11 +11,12 @@ interface ChatMessageProps {
   streamingText?: string;
   onEdit: (id: string, content: string) => void;
   onDelete: (id: string) => void;
+  onRegenerate: (id: string) => void;
   onRewind: (id: string) => void;
   isLast?: boolean;
 }
 
-export function ChatMessage({ message, isStreaming, streamingText, onEdit, onDelete }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming, streamingText, onEdit, onDelete, onRegenerate, onRewind }: ChatMessageProps) {
   const { state } = useApp();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
@@ -34,10 +35,10 @@ export function ChatMessage({ message, isStreaming, streamingText, onEdit, onDel
       onMouseEnter={() => setShowActions(true)} onMouseLeave={() => setShowActions(false)}
     >
       <div className={cn(
-          "text-xs font-bold tracking-widest mb-2 uppercase",
+          "text-xs font-bold tracking-widest mb-2 uppercase flex items-center gap-2",
           message.role === 'user' ? 'text-gray-500' : 'text-[var(--glow-color)] text-theme-glow'
       )}>
-        {message.role === 'user' ? '▶ PLAYER' : '◆ NARRATOR'}
+        <span>{message.role === 'user' ? '>> PLAYER' : '## NARRATOR'}</span>
       </div>
 
       {isEditing ? (
@@ -49,15 +50,17 @@ export function ChatMessage({ message, isStreaming, streamingText, onEdit, onDel
            </div>
         </div>
       ) : (
-        <div className="text-gray-300 text-sm font-mono leading-relaxed prose prose-invert prose-sm max-w-none">
+        <div className="text-gray-300 text-sm font-mono leading-relaxed prose prose-invert prose-sm max-w-none whitespace-pre-wrap">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || ''}</ReactMarkdown>
         </div>
       )}
 
       {showActions && !isStreaming && !isEditing && (
-        <div className="absolute top-2 right-2 flex gap-1 bg-black/80 border border-gray-800 p-1">
-          <button onClick={() => setIsEditing(true)} className="p-1 hover:text-white text-gray-500 transition-colors">✎</button>
-          <button onClick={() => onDelete(message.id)} className="p-1 hover:text-red-500 text-gray-500 transition-colors">✕</button>
+        <div className="absolute top-2 right-2 flex gap-1 bg-black/80 border border-gray-800 p-1 text-[10px] font-mono">
+          <button onClick={() => onRegenerate(message.id)} title="Regenerate" className="px-1.5 py-0.5 hover:text-cyan-400 text-gray-500 transition-colors border border-transparent hover:border-cyan-400/30">RGN</button>
+          <button onClick={() => onRewind(message.id)} title="Rewind to here" className="px-1.5 py-0.5 hover:text-purple-400 text-gray-500 transition-colors border border-transparent hover:border-purple-400/30">RWD</button>
+          <button onClick={() => setIsEditing(true)} title="Edit" className="px-1.5 py-0.5 hover:text-white text-gray-500 transition-colors border border-transparent hover:border-gray-600">EDT</button>
+          <button onClick={() => onDelete(message.id)} title="Delete" className="px-1.5 py-0.5 hover:text-red-500 text-gray-500 transition-colors border border-transparent hover:border-red-500/30">DEL</button>
         </div>
       )}
     </div>

@@ -5,6 +5,10 @@ set -e  # Exit immediately if a command exits with a non-zero status
 # LOREKEEPER TERMINAL - LAUNCHER
 # ==========================================
 
+# Resolve script root (portable, symlink-safe)
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
 echo "Layor 1: Initializing System..."
 
 # Delete legacy config artifacts to prevent build confusion
@@ -22,21 +26,25 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+if [ ! -x "venv/bin/python" ]; then
+    echo "   >> Broken venv detected. Rebuilding..."
+    rm -rf venv
+    python3 -m venv .venv
+fi
+
+
 # 3. Setup Backend
 echo "Layor 2: Synchronizing Neural Backend..."
-cd backend
+cd "$ROOT_DIR/backend"
 
-# Create venv if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "   >> Creating Python Virtual Environment..."
     python3 -m venv venv
 fi
 
-# Force upgrade pip using the venv binary directly
 echo "   >> Updating pip..."
 ./venv/bin/python -m pip install --upgrade pip
 
-# Install requirements using the venv binary directly
 echo "   >> Installing Python Dependencies..."
 if [ -f "requirements.txt" ]; then
     ./venv/bin/pip install -r requirements.txt
@@ -45,14 +53,15 @@ else
     exit 1
 fi
 
-# Verify installation using the venv binary directly
 if ! ./venv/bin/python -c "import flask" &> /dev/null; then
-    echo "❌ Error: Flask failed to install. Retrying with verbose output..."
+    echo "❌ Flask missing. Repairing..."
     ./venv/bin/pip install flask flask-cors requests
 fi
 
 echo "   >> Backend Ready."
-cd ..
+
+# Back to root explicitly (no vibes-based cd ..)
+cd "$ROOT_DIR"
 
 # 4. Setup Frontend
 echo "Layor 3: Compiling Interface Matrices..."
@@ -69,9 +78,8 @@ if [ "$1" == "--dev" ]; then
     npm run electron:dev
 else
     echo "   >> Building Production Assets..."
-    # Build React App using vite directly to avoid type checking blocking the build
     npx vite build
-
     echo "🚀 SYSTEM READY. LAUNCHING TERMINAL."
     npm run electron:start
 fi
+

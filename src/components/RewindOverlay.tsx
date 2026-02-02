@@ -6,7 +6,8 @@ import { cn } from '../utils/cn';
 interface RewindOverlayProps {
   isActive: boolean;
   onComplete: () => void;
-  colorTheme: 'purple' | 'cyan' | 'green' | 'amber';
+  colorTheme: 'purple' | 'cyan' | 'green' | 'amber' | 'hell';
+  mode?: 'rewind' | 'regenerate';
 }
 
 const themeColors = {
@@ -38,43 +39,67 @@ const themeColors = {
     bgOpacity: 'bg-amber-500/50',
     via: 'via-amber-500/50',
   },
+  hell: {
+    primary: 'text-red-500',
+    secondary: 'text-red-600',
+    bg: 'bg-red-600',
+    bgOpacity: 'bg-red-600/50',
+    via: 'via-red-600/50',
+  },
 };
 
-export function RewindOverlay({ isActive, onComplete, colorTheme }: RewindOverlayProps) {
+export function RewindOverlay({ isActive, onComplete, colorTheme, mode = 'rewind' }: RewindOverlayProps) {
   const { state } = useApp();
-  const { playRewindSound, playStaticNoise } = useSound(state.settings.soundEnabled);
+  const { playRewindSound, playStaticNoise, playGlitchSound } = useSound(state.settings.soundEnabled);
   const [phase, setPhase] = useState<'rewind' | 'static' | 'none'>('none');
 
   const colors = themeColors[colorTheme];
 
   useEffect(() => {
     if (isActive) {
-      setPhase('rewind');
-      playRewindSound();
-      
-      // VHS rewind phase
-      const staticTimeout = setTimeout(() => {
+      if (mode === 'rewind') {
+        setPhase('rewind');
+        playRewindSound();
+        
+        // VHS rewind phase
+        const staticTimeout = setTimeout(() => {
+          setPhase('static');
+          playStaticNoise(0.5);
+        }, 1200);
+
+        // Complete
+        const completeTimeout = setTimeout(() => {
+          setPhase('none');
+          onComplete();
+        }, 1700);
+
+        return () => {
+          clearTimeout(staticTimeout);
+          clearTimeout(completeTimeout);
+        };
+      } else {
+        // Regenerate mode - shorter, glitchy transition
         setPhase('static');
-        playStaticNoise(0.5);
-      }, 1200);
+        playGlitchSound();
+        
+        const completeTimeout = setTimeout(() => {
+          setPhase('none');
+          onComplete();
+        }, 400);
 
-      // Complete
-      const completeTimeout = setTimeout(() => {
-        setPhase('none');
-        onComplete();
-      }, 1700);
-
-      return () => {
-        clearTimeout(staticTimeout);
-        clearTimeout(completeTimeout);
-      };
+        return () => {
+          clearTimeout(completeTimeout);
+        };
+      }
+    } else {
+      setPhase('none');
     }
-  }, [isActive, onComplete, playRewindSound, playStaticNoise]);
+  }, [isActive, onComplete, playRewindSound, playStaticNoise, playGlitchSound, mode]);
 
   if (phase === 'none') return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90">
+    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/90">
       {phase === 'rewind' && (
         <>
           {/* VHS tracking lines effect */}
@@ -114,22 +139,18 @@ export function RewindOverlay({ isActive, onComplete, colorTheme }: RewindOverla
           
           {/* Rewind icon - large VHS style */}
           <div className="relative z-10 flex flex-col items-center gap-6">
-            <div className={cn("flex items-center gap-1 animate-pulse", colors.primary)}>
-              {/* Double rewind arrows */}
-              <svg className="w-20 h-20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/>
-              </svg>
-              <svg className="w-20 h-20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/>
-              </svg>
-            </div>
+          <div className={cn("flex items-center gap-4 animate-pulse text-6xl font-bold", colors.primary)}>
+              {/* Double rewind arrows replaced with text-based ones */}
+              <span>{"<<"}</span>
+              <span>{"<<"}</span>
+          </div>
             
             {/* VHS style counter */}
             <div className={cn(
               "font-mono text-3xl tracking-[0.3em] animate-blink",
               colors.primary
             )}>
-              ◄◄ REW ◄◄
+              {mode === 'rewind' ? '<< REW <<' : '!! GLITCH !!'}
             </div>
             
             {/* VHS timestamp style */}

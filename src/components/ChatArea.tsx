@@ -10,6 +10,7 @@ export function ChatArea() {
   const { state, dispatch } = useApp();
   const [input, setInput] = useState('');
   const [rewindingTo, setRewindingTo] = useState<string | null>(null);
+  const [transitionMode, setTransitionMode] = useState<'rewind' | 'regenerate'>('rewind');
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -35,15 +36,16 @@ export function ChatArea() {
     check();
   }, []);
 
-  const sendToAPI = useCallback(async (userMessage: string) => {
+  const sendToAPI = useCallback(async (userMessage: string, historyOverride?: any[]) => {
     dispatch({ type: 'SET_GENERATING', payload: true });
     let fullResponse = '';
     try {
+      const history = historyOverride || state.messages.map(m => ({ role: m.role, content: m.content }));
       const request = {
         message: userMessage,
         model: state.settings.model,
         instanceId: state.currentInstance?.id,
-        history: state.messages.map(m => ({ role: m.role, content: m.content })),
+        history: history,
         lore: state.lore,
         profile: state.profile,
       };
@@ -63,6 +65,66 @@ export function ChatArea() {
     dispatch({ type: 'SET_GENERATING', payload: false });
   }, [dispatch, state.currentInstance, state.messages, state.lore, state.profile, state.settings.model]);
 
+  const handleRegenerate = useCallback((messageId: string) => {
+    if (state.isGenerating || !state.currentInstance) return;
+    setTransitionMode('regenerate');
+    setRewindingTo(messageId);
+  }, [state.isGenerating, state.currentInstance]);
+
+  const handleRewind = useCallback((messageId: string) => {
+    if (state.isGenerating || !state.currentInstance) return;
+    setTransitionMode('rewind');
+    setRewindingTo(messageId);
+  }, [state.isGenerating, state.currentInstance]);
+
+  const onRewindComplete = useCallback(() => {
+    if (!rewindingTo || !state.currentInstance) {
+        setRewindingTo(null);
+        return;
+    }
+
+    const index = state.messages.findIndex(m => m.id === rewindingTo);
+    if (index === -1) {
+        setRewindingTo(null);
+        return;
+    }
+
+    const message = state.messages[index];
+    let newMessages;
+    let lastUserMessage = '';
+
+    if (transitionMode === 'rewind') {
+        // Rewind mode: just go back to this message (inclusive if user, exclusive if ai?)
+        // Actually, if I rewind to a user message, I probably want that to be the last message.
+        // If I rewind to an AI message, I probably want it to be the last message.
+        if (message.role === 'user') {
+            newMessages = state.messages.slice(0, index + 1);
+        } else {
+            newMessages = state.messages.slice(0, index + 1);
+        }
+        dispatch({ type: 'SET_MESSAGES', payload: newMessages });
+        setRewindingTo(null);
+    } else {
+        // Regenerate mode: remove and trigger API
+        if (message.role === 'ai') {
+            // If regenerating AI: Remove this AI message and everything after it
+            newMessages = state.messages.slice(0, index);
+            const lastUserIndex = [...newMessages].reverse().findIndex(m => m.role === 'user');
+            if (lastUserIndex !== -1) {
+                lastUserMessage = newMessages[newMessages.length - 1 - lastUserIndex].content;
+            }
+        } else {
+            // If regenerating User: Keep this user message, remove everything after it
+            newMessages = state.messages.slice(0, index + 1);
+            lastUserMessage = message.content;
+        }
+
+        dispatch({ type: 'SET_MESSAGES', payload: newMessages });
+        setRewindingTo(null);
+        setTimeout(() => sendToAPI(lastUserMessage, newMessages.map(m => ({ role: m.role, content: m.content }))), 100);
+    }
+  }, [rewindingTo, state.currentInstance, state.messages, dispatch, sendToAPI, transitionMode]);
+
   const handleSend = () => {
     if (!input.trim() || state.isGenerating || !state.currentInstance) return;
     playMessageSent();
@@ -70,6 +132,36 @@ export function ChatArea() {
     setInput('');
     dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'user', content: msg } });
     setTimeout(() => sendToAPI(msg), 100);
+  };
+
+  const handleFinishEpisode = async () => {
+    if (!state.currentInstance || state.isGenerating) return;
+    if (!confirm('Finish this episode and move to the next?')) return;
+
+    dispatch({ type: 'SET_GENERATING', payload: true });
+    try {
+      const result = await api.advanceInstance(
+        state.currentInstance.id,
+        state.messages,
+        state.settings.model
+      );
+
+      if (result.success) {
+        // Refresh instances to get the updated state
+        const updatedInstances = await api.getInstances();
+        dispatch({ type: 'SET_INSTANCES', payload: updatedInstances });
+        
+        // Find and set the current instance
+        const updated = updatedInstances.find(i => i.id === state.currentInstance?.id);
+        if (updated) {
+          dispatch({ type: 'SET_CURRENT_INSTANCE', payload: updated });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to finish episode:', error);
+    } finally {
+      dispatch({ type: 'SET_GENERATING', payload: false });
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -84,8 +176,8 @@ export function ChatArea() {
   const isFinished = state.currentInstance && !currentEp;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <RewindOverlay isActive={rewindingTo !== null} onComplete={() => { if(rewindingTo) dispatch({ type: 'DELETE_MESSAGE', payload: rewindingTo }); setRewindingTo(null); }} colorTheme={state.settings.colorTheme} />
+    <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+      <RewindOverlay isActive={rewindingTo !== null} onComplete={onRewindComplete} colorTheme={state.settings.colorTheme} mode={transitionMode} />
 
       {/* Header Info */}
       {state.currentInstance && (
@@ -105,8 +197,8 @@ export function ChatArea() {
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto custom-scrollbar relative">
         {!state.currentInstance ? (
           <div className="h-full flex flex-col items-center justify-center opacity-50">
-            <div className="text-6xl mb-4">◈</div>
-            <div>SELECT OR START A CAMPAIGN</div>
+            <div className="text-4xl mb-4 font-mono tracking-[0.2em] border border-white/20 px-4 py-2">CRISTOL</div>
+            <div className="text-xs tracking-widest">SELECT OR START A CAMPAIGN</div>
           </div>
         ) : isFinished ? (
             <div className="h-full flex flex-col items-center justify-center text-green-500">
@@ -126,11 +218,12 @@ export function ChatArea() {
                 key={m.id} message={m}
                 onEdit={(id,c) => dispatch({type: 'UPDATE_MESSAGE', payload: {id, content:c}})}
                 onDelete={(id) => dispatch({type: 'DELETE_MESSAGE', payload: id})}
-                onRewind={() => {}}
+                onRegenerate={handleRegenerate}
+                onRewind={handleRewind}
                 isLast={i === state.messages.length -1}
                />
              ))}
-             {state.streamingText && <ChatMessage message={{id:'stream', role:'ai', content: state.streamingText}} isStreaming onEdit={()=>{}} onDelete={()=>{}} onRewind={()=>{}} />}
+             {state.streamingText && <ChatMessage message={{id:'stream', role:'ai', content: state.streamingText}} isStreaming onEdit={()=>{}} onDelete={()=>{}} onRegenerate={()=>{}} onRewind={()=>{}} />}
           </div>
         )}
       </div>
@@ -149,6 +242,15 @@ export function ChatArea() {
              <button onClick={handleSend} disabled={!input.trim() || state.isGenerating} className={cn("px-6 border font-bold text-sm", colors.border, colors.text, colors.bgHover)}>
                 {state.isGenerating ? "..." : "SEND"}
              </button>
+             {state.messages.length >= 4 && (
+               <button 
+                 onClick={handleFinishEpisode} 
+                 disabled={state.isGenerating}
+                 className={cn("px-4 border font-bold text-[10px] leading-tight w-20 flex items-center justify-center text-center", colors.border, colors.text, colors.bgHover)}
+               >
+                 FINISH EPISODE
+               </button>
+             )}
            </div>
         </div>
       )}

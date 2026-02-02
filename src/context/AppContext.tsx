@@ -50,7 +50,8 @@ type Action =
   | { type: 'UPDATE_TOKEN_USAGE'; payload: { prompt: number; response: number } }
   | { type: 'UPDATE_SETTINGS'; payload: Partial<Settings> }
   | { type: 'SET_ACTIVE_PANEL'; payload: AppState['activePanel'] }
-  | { type: 'SET_EDITING_SHOW'; payload: Show | null | undefined };
+  | { type: 'SET_EDITING_SHOW'; payload: Show | null | undefined }
+  | { type: 'SET_MESSAGES'; payload: Message[] };
 
 function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -104,6 +105,10 @@ function appReducer(state: AppState, action: Action): AppState {
       const newMessages = state.messages.filter(m => m.id !== action.payload);
       if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: newMessages });
       return { ...state, messages: newMessages };
+    }
+    case 'SET_MESSAGES': {
+      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: action.payload });
+      return { ...state, messages: action.payload };
     }
 
     case 'SET_GENERATING': return { ...state, isGenerating: action.payload };
