@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Roleplay Terminal Backend v3.4.0
-Fixed: Strict Transcript Following Mode
+Roleplay Terminal Backend v4.0.0
+Transcript Fidelity + Dialogue Priority Mode
 """
 
 import json
@@ -30,8 +30,8 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1"
 
 # Model Defaults
 _env_model = os.getenv('OPENROUTER_MODEL')
-CHAT_MODEL = _env_model if _env_model else 'google/gemini-3-pro-preview'
-SUMMARY_MODEL = _env_model if _env_model else 'google/gemini-3-pro-preview'
+CHAT_MODEL = _env_model if _env_model else 'anthropic/claude-sonnet-4'
+SUMMARY_MODEL = _env_model if _env_model else 'anthropic/claude-sonnet-4'
 
 # Directory Setup
 BASE_DIR = Path(__file__).parent
@@ -45,46 +45,40 @@ for d in [DATA_DIR, SHOWS_DIR, INSTANCES_DIR, PROMPTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        OPTIMIZED PROMPTS (TRANSCRIPT MODE)
+#                        DEFAULT PROMPTS (FALLBACKS)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DEFAULT_SYSTEM_PROMPT = """<system_instruction>
-  <role_definition>
-    You are a transcript narrator. Your job is to present the episode transcript section by section.
-  </role_definition>
+DEFAULT_ANCHOR = """You are the Helluva Director. You novelize episode transcripts — the User's character is inserted into canon events as they play out.
 
-  <output_rules>
-    1. Output ONLY text that appears in the provided transcript
-    2. Copy dialogue and narration exactly as written
-    3. Stop after 2-4 paragraphs or at a natural scene break
-    4. DO NOT add new content, embellishments, or creative additions
-    5. DO NOT modify the transcript's wording or style
-  </output_rules>
-</system_instruction>"""
+The episode transcript is YOUR SCRIPT. Copy NPC dialogue WORD-FOR-WORD. Follow events in order. The User is inserted INTO the episode. Prioritize dialogue and events over description (50%+ dialogue). Check conversation history to find where you left off.
 
-DEFAULT_REINFORCEMENT = """<final_check>
-  Before sending your response:
-  1. Verify every sentence comes directly from the transcript
-  2. Confirm you haven't added any new dialogue or scenes
-  3. Check that you've stopped at an appropriate pause point
+User dialogue rules: If they provide words, use EXACTLY those words, nothing more. If they don't provide words, write ZERO dialogue for them.
 
-  If the transcript is complete, output: [Episode Complete]
-</final_check>"""
+If the transcript is exhausted, output: [Episode Complete]"""
 
-DEFAULT_SUMMARY_PROMPT = """<task>
-  You are the "Campaign Archivist." Your sole function is to compress the narrative into dry, clinical, objective bullet points.
-</task>
-<guidelines>
-  - Style: Robotic, police-report style. No emotions.
-  - Content: Record locations, items, injuries, and decisions.
-</guidelines>
-<output_format>
-  Provide the summary as a list of bullet points.
-</output_format>"""
+DEFAULT_SYSTEM_PROMPT = """You novelize episode transcripts. Core rules:
+1. Copy NPC dialogue WORD-FOR-WORD from the transcript
+2. Follow scenes in order — never skip, never rearrange
+3. User dialogue: use their EXACT words only (or zero if none provided)
+4. 50%+ dialogue and action, minimal description
+5. End with an NPC directly addressing the User's character
+6. Never summarize — write out conversations fully"""
 
-DEFAULT_ANCHOR = """You are presenting an episode transcript section by section.
+DEFAULT_REINFORCEMENT = """VERIFY BEFORE OUTPUT:
+1. Every NPC line matches the transcript VERBATIM
+2. User dialogue uses their EXACT words only — no additions, no repeats
+3. At least 50% dialogue/action, minimal description
+4. At least 3-5 NPC dialogue lines
+5. 2-3 NPC acknowledgments of the User's presence
+6. Response ENDS with an NPC addressing the User directly
+7. Continued from correct position — no restarts, no repeats
+8. No brackets, no asterisks, proper punctuation
+Output ONLY polished narrative prose. No checklists."""
 
-Follow the transcript exactly. Do not add new content."""
+DEFAULT_SUMMARY_PROMPT = """Compress the session into concise, objective bullet points.
+Style: Clinical, police-report tone.
+Content: Locations, NPCs, items, injuries, decisions, key dialogue, plot developments, unresolved threads, User character actions and NPC reactions.
+Format: Bullet-point list grouped by scene/event."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -92,14 +86,16 @@ Follow the transcript exactly. Do not add new content."""
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def load_prompt(filename, default_text):
-    """Loads a prompt from a .txt file, creating it if it doesn't exist."""
+    """Loads a prompt from a .txt file, creating it with default if it doesn't exist."""
     path = PROMPTS_DIR / filename
     if not path.exists():
         with open(path, 'w', encoding='utf-8') as f:
             f.write(default_text)
+        print(f"[INIT] Created {filename} with default content")
         return default_text
     with open(path, 'r', encoding='utf-8') as f:
-        return f.read().strip()
+        content = f.read().strip()
+    return content if content else default_text
 
 
 def get_headers():
@@ -117,7 +113,7 @@ def stream_openrouter(messages, model):
         yield "[Error: OPENROUTER_API_KEY not set]"
         return
 
-    print(f"[API CALL] Model: {model}")
+    print(f"[API] Model: {model} | Messages: {len(messages)}")
 
     try:
         payload = {
@@ -127,10 +123,6 @@ def stream_openrouter(messages, model):
             "max_tokens": 4096,
             "temperature": 1.0,
             "top_p": 0.95,
-            "provider": {
-                "order": ["Anthropic"],
-                "allow_fallbacks": True
-            }
         }
 
         with requests.post(
@@ -142,9 +134,9 @@ def stream_openrouter(messages, model):
         ) as resp:
             if resp.status_code >= 400:
                 error_text = resp.text
-                print(f"\n[API ERROR] Status: {resp.status_code}")
-                print(f"[API ERROR] Body: {error_text}\n")
-                yield f"[Error: API returned {resp.status_code} - Check Server Logs]"
+                print(f"[API ERROR] Status: {resp.status_code}")
+                print(f"[API ERROR] Body: {error_text[:500]}")
+                yield f"[Error: API returned {resp.status_code}]"
                 return
 
             for line in resp.iter_lines():
@@ -158,17 +150,20 @@ def stream_openrouter(messages, model):
                     try:
                         data = json.loads(data_str)
                         if 'error' in data:
-                            print(f"[STREAM CHUNK ERROR] {data['error']}")
-                            yield f"[Error: {data['error']['message']}]"
-
+                            print(f"[STREAM ERROR] {data['error']}")
+                            yield f"[Error: {data['error'].get('message', 'Unknown')}]"
+                            return
                         token = data.get('choices', [{}])[0].get('delta', {}).get('content', '')
                         if token:
                             yield token
-                    except:
+                    except json.JSONDecodeError:
                         continue
+    except requests.exceptions.Timeout:
+        print("[API] Request timed out")
+        yield "[Error: Request timed out]"
     except Exception as e:
-        print(f"[CONNECTION EXCEPTION] {e}")
-        yield f"[Error: Connection failed - {str(e)}]"
+        print(f"[API EXCEPTION] {e}")
+        yield f"[Error: {str(e)}]"
 
 
 def call_summary_api(transcript_text):
@@ -186,9 +181,10 @@ def call_summary_api(transcript_text):
                 "model": SUMMARY_MODEL,
                 "messages": [
                     {"role": "system", "content": summary_prompt},
-                    {"role": "user", "content": transcript_text}
+                    {"role": "user", "content": f"Summarize this session:\n\n{transcript_text}"}
                 ],
                 "temperature": 0.3,
+                "max_tokens": 2048,
                 "stream": False
             },
             timeout=60
@@ -198,6 +194,153 @@ def call_summary_api(transcript_text):
         return f"• Summary generation failed (API {resp.status_code})"
     except Exception as e:
         return f"• Summary generation error: {str(e)}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                         PROMPT CHAIN BUILDER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_prompt_chain(instance):
+    """
+    Constructs the full message chain for the API call.
+
+    Structure:
+      1. SYSTEM: Anchor + System Prompt
+      2. Context block: lore + profile + summaries + episode transcript (EVERY turn)
+      3. Synthetic acknowledgment
+      4. Conversation history (trimmed, all but last message)
+      5. Final user message + reinforcement
+    """
+    messages = []
+
+    # ─── 1. SYSTEM MESSAGE ────────────────────────────────────────────────
+    anchor = load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
+    system_prompt = load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
+    messages.append({
+        "role": "system",
+        "content": f"{anchor}\n\n{system_prompt}"
+    })
+
+    # ─── 2. PERSISTENT CONTEXT BLOCK (sent EVERY turn) ───────────────────
+    context_parts = []
+
+    # World lore
+    lore = instance.get('lore', '').strip()
+    if lore:
+        context_parts.append(f"<world_lore>\n{lore}\n</world_lore>")
+
+    # Character profile
+    profile = instance.get('profile', '').strip()
+    if profile:
+        context_parts.append(f"<user_character>\n{profile}\n</user_character>")
+
+    # Previous episode summaries
+    summaries = instance.get('summaryHistory', [])
+    if summaries:
+        summary_lines = []
+        for s in summaries:
+            ep_name = s.get('episodeName', 'Unknown Episode')
+            ep_summary = s.get('summary', '(No summary available)')
+            summary_lines.append(f"### {ep_name}\n{ep_summary}")
+        context_parts.append(
+            "<previous_episodes>\n" + "\n\n".join(summary_lines) + "\n</previous_episodes>"
+        )
+
+    # Episode transcript — ALWAYS included
+    ep_idx = instance.get('currentEpisodeIndex', 0)
+    episodes = instance.get('episodes', [])
+    ep_context = ""
+    ep_name = ""
+
+    if ep_idx < len(episodes):
+        current_ep = episodes[ep_idx]
+        ep_name = current_ep.get('name', f'Episode {ep_idx + 1}')
+        ep_context = current_ep.get('context', '').strip()
+
+    if ep_context:
+        context_parts.append(
+            f'<episode_transcript title="{ep_name}">\n'
+            f'{ep_context}\n'
+            f'</episode_transcript>'
+        )
+
+    # ─── 3. INJECT CONTEXT WITH SYNTHETIC ACK ────────────────────────────
+    if context_parts:
+        context_block = "\n\n".join(context_parts)
+        messages.append({"role": "user", "content": context_block})
+        messages.append({
+            "role": "assistant",
+            "content": (
+                "Context loaded. I will:\n"
+                "• Follow the episode transcript beat by beat\n"
+                "• Copy NPC dialogue WORD-FOR-WORD\n"
+                "• Use the User's EXACT dialogue (no additions) or zero if none provided\n"
+                "• Prioritize dialogue over description\n"
+                "• Check conversation history to continue from the correct position\n"
+                "• End with an NPC addressing the User's character"
+            )
+        })
+
+    # ─── 4. CONVERSATION HISTORY (all but last message) ──────────────────
+    conv_messages = instance.get('messages', [])
+    MAX_HISTORY = 30  # Increased to help with position tracking
+    if len(conv_messages) > MAX_HISTORY:
+        conv_messages = conv_messages[-MAX_HISTORY:]
+
+    for msg in conv_messages[:-1]:
+        content = msg.get('content', '').strip()
+        if not content:
+            continue
+        role = 'assistant' if msg.get('role') == 'assistant' else 'user'
+        messages.append({"role": role, "content": content})
+
+    # ─── 5. FINAL USER MESSAGE + REINFORCEMENT ──────────────────────────
+    last_user_msg = ""
+    if conv_messages:
+        last_msg = conv_messages[-1]
+        if last_msg.get('role') == 'user':
+            last_user_msg = last_msg.get('content', '').strip()
+
+    reinforcement = load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
+
+    is_episode_start = len(
+        [m for m in instance.get('messages', []) if m.get('role') == 'assistant']
+    ) == 0
+
+    final_parts = []
+
+    if last_user_msg:
+        final_parts.append(f"USER ACTION/DIALOGUE:\n{last_user_msg}")
+    elif is_episode_start:
+        final_parts.append(
+            "[BEGIN EPISODE]\n"
+            "Start from the top of the transcript. "
+            "Brief scene-setting (1-2 sentences), then get into dialogue immediately. "
+            "End with an NPC addressing the User's character."
+        )
+    else:
+        final_parts.append(
+            "[CONTINUE]\n"
+            "Continue from where we left off in the transcript. "
+            "Check the conversation history to find your position. "
+            "The User is present. Advance to the next beats. "
+            "End with an NPC addressing the User's character."
+        )
+
+    final_parts.append(f"\n{reinforcement}")
+    messages.append({"role": "user", "content": "\n\n".join(final_parts)})
+
+    # Debug logging
+    transcript_len = len(ep_context) if ep_context else 0
+    history_count = len(conv_messages)
+    print(
+        f"[CHAIN] Messages: {len(messages)} | "
+        f"Episode: {ep_name} | "
+        f"Transcript: {transcript_len} chars | "
+        f"History: {history_count} | "
+        f"Start: {is_episode_start}"
+    )
+    return messages
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -217,6 +360,7 @@ if not list(SHOWS_DIR.glob('*.json')):
     }
     with open(SHOWS_DIR / "default.json", "w") as f:
         json.dump(default_show, f, indent=2)
+    print("[INIT] Created default show")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -244,7 +388,8 @@ def handle_shows():
     for f in SHOWS_DIR.glob('*.json'):
         try:
             shows.append(json.load(open(f, 'r')))
-        except:
+        except Exception as e:
+            print(f"[WARN] Failed to load show {f}: {e}")
             continue
     return jsonify(shows)
 
@@ -298,7 +443,8 @@ def handle_instances():
     for f in INSTANCES_DIR.glob('*.json'):
         try:
             instances.append(json.load(open(f, 'r')))
-        except:
+        except Exception as e:
+            print(f"[WARN] Failed to load instance {f}: {e}")
             continue
     instances.sort(key=lambda x: x.get('lastPlayed', ''), reverse=True)
     return jsonify(instances)
@@ -318,7 +464,7 @@ def handle_instance_id(inst_id):
     with open(path, 'r') as f:
         current = json.load(f)
     data = request.json
-    for key in ['messages', 'lore', 'profile', 'currentEpisodeIndex', 'summaryHistory']:
+    for key in ['messages', 'lore', 'profile', 'currentEpisodeIndex', 'summaryHistory', 'episodes']:
         if key in data:
             current[key] = data[key]
     current['lastPlayed'] = datetime.now().isoformat()
@@ -334,12 +480,13 @@ def advance_episode(inst_id):
         return jsonify({"error": "Not found"}), 404
     inst = json.load(open(path, 'r'))
 
+    # Build transcript of the session
     transcript = ""
     for m in inst.get('messages', []):
-        role = "PLAYER" if m['role'] == 'user' else "STORY"
-        transcript += f"{role}: {m['content']}\n\n"
+        role = "USER" if m['role'] == 'user' else "STORY"
+        transcript += f"{role}:\n{m['content']}\n\n"
     if not transcript.strip():
-        transcript = "[No events recorded]"
+        transcript = "[No events recorded this session]"
 
     summary_text = call_summary_api(transcript)
 
@@ -358,6 +505,8 @@ def advance_episode(inst_id):
 
     with open(path, 'w') as f:
         json.dump(inst, f, indent=2)
+
+    print(f"[ADVANCE] {inst_id} → Episode {inst['currentEpisodeIndex']}")
     return jsonify({
         "success": True,
         "summary": summary_text,
@@ -365,113 +514,34 @@ def advance_episode(inst_id):
     })
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                              CHAT LOGIC
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def build_prompt_chain(instance):
-    """Constructs prompt with transcript in LATEST user message for guaranteed visibility."""
-    messages = []
-
-    # 1. SIMPLE SYSTEM PROMPT - Just set the role
-    anchor = load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
-    system_prompt = load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
-    messages.append({"role": "system", "content": f"{anchor}\n\n{system_prompt}"})
-
-    # 2. Get the episode transcript
-    ep_idx = instance.get('currentEpisodeIndex', 0)
-    episodes = instance.get('episodes', [])
-    ep_transcript = ""
-    ep_name = ""
-
-    if ep_idx < len(episodes):
-        current_ep = episodes[ep_idx]
-        ep_name = current_ep.get('name', '')
-        ep_transcript = current_ep.get('context', '')
-
-    # 3. Add conversation history (all but the last user message)
-    conv_messages = instance.get('messages', [])
-    MAX_HISTORY = 20
-    if len(conv_messages) > MAX_HISTORY:
-        conv_messages = conv_messages[-MAX_HISTORY:]
-
-    for msg in conv_messages[:-1]:  # All except last message
-        content = msg.get('content', '').strip()
-        if not content:
-            continue
-        role = 'assistant' if msg.get('role') == 'assistant' else 'user'
-        messages.append({"role": role, "content": content})
-
-    # 4. THE KEY FIX: Add transcript to the FINAL user message
-    # This ensures the AI sees it immediately before generating
-    last_user_msg = ""
-    if conv_messages:
-        last_msg = conv_messages[-1]
-        if last_msg.get('role') == 'user':
-            last_user_msg = last_msg.get('content', '').strip()
-
-    if ep_transcript:
-        # Build the combined message with transcript FIRST, then user input
-        final_message = f"""<EPISODE_TRANSCRIPT>
-Episode: {ep_name}
-
-{ep_transcript}
-</EPISODE_TRANSCRIPT>
-
-<INSTRUCTIONS>
-Continue the transcript from where we left off. Output the next 2-4 paragraphs EXACTLY as written above.
-Do NOT add new dialogue or scenes. Copy the text verbatim.
-</INSTRUCTIONS>
-
-User action: {last_user_msg if last_user_msg else "[Waiting]"}"""
-
-        messages.append({"role": "user", "content": final_message})
-    else:
-        # No transcript mode - just use the user's message
-        if last_user_msg:
-            messages.append({"role": "user", "content": last_user_msg})
-
-    return messages
-
-
 @app.route('/chat', methods=['POST'])
 def chat():
-    print("\n[DEBUG] Incoming /chat Request")
-
     data = request.get_json(force=True, silent=True)
     if not data:
-        print("[ERROR] Failed to parse JSON body")
         return jsonify({"error": "Invalid JSON"}), 400
 
     instance_id = data.get('instanceId')
-    print(f"[DEBUG] Payload instanceId: {instance_id}")
-
     if not instance_id:
-        print("[ERROR] instanceId is missing from payload")
         return jsonify({"error": "Missing instanceId"}), 400
 
     path = INSTANCES_DIR / f"{instance_id}.json"
     if not path.exists():
-        print(f"[ERROR] Instance file not found: {path}")
         return jsonify({"error": "Instance not found"}), 404
 
     with open(path, 'r') as f:
         inst = json.load(f)
 
-    user_input = data.get('message', '')
+    user_input = data.get('message', '').strip()
     requested_model = data.get('model')
     model = requested_model if requested_model else CHAT_MODEL
 
-    if not model:
-        model = 'google/gemini-3-pro-preview'
-
+    # Add user message if provided (with dedup check)
     if user_input:
-        # De-duplication check
         should_append = True
         if inst['messages']:
             last_msg = inst['messages'][-1]
             if last_msg.get('role') == 'user' and last_msg.get('content') == user_input:
-                print(f"[DEBUG] Duplicate message blocked")
+                print(f"[DEDUP] Duplicate user message blocked")
                 should_append = False
 
         if should_append:
@@ -482,11 +552,10 @@ def chat():
 
     prompt_msgs = build_prompt_chain(inst)
 
-    print(f"[DEBUG] Prompt chain: {len(prompt_msgs)} messages")
-
     def generate():
         full_response = ""
         error_occurred = False
+
         try:
             for token in stream_openrouter(prompt_msgs, model):
                 full_response += token
@@ -496,14 +565,19 @@ def chat():
             print(f"[STREAM ERROR] {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
+        # Save assistant response
         if full_response.strip() and not error_occurred:
             try:
                 with open(path, 'r') as f:
                     current_inst = json.load(f)
-                current_inst['messages'].append({"role": "assistant", "content": full_response})
+                current_inst['messages'].append({
+                    "role": "assistant",
+                    "content": full_response
+                })
                 current_inst['lastPlayed'] = datetime.now().isoformat()
                 with open(path, 'w') as f:
                     json.dump(current_inst, f, indent=2)
+                print(f"[SAVED] Assistant response: {len(full_response)} chars")
             except Exception as e:
                 print(f"[SAVE ERROR] {e}")
 
@@ -512,10 +586,33 @@ def chat():
     return Response(generate(), mimetype='text/event-stream')
 
 
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok",
+        "model": CHAT_MODEL,
+        "api_key_set": bool(OPENROUTER_API_KEY)
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
+
 if __name__ == '__main__':
-    print(f"═" * 50)
-    print(f"  ROLEPLAY TERMINAL v3.4.0")
-    print(f"  Mode: STRICT TRANSCRIPT PLAYBACK")
-    print(f"  Model: {CHAT_MODEL}")
-    print(f"═" * 50)
+    print("═" * 60)
+    print("  ROLEPLAY TERMINAL v4.0.0")
+    print("  Mode: TRANSCRIPT FIDELITY + DIALOGUE PRIORITY")
+    print(f"  Chat Model: {CHAT_MODEL}")
+    print(f"  Summary Model: {SUMMARY_MODEL}")
+    print(f"  API Key: {'Set' if OPENROUTER_API_KEY else 'NOT SET'}")
+    print("═" * 60)
+
+    # Load prompts on startup to create files if missing
+    load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
+    load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
+    load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
+    load_prompt("SUMMARY_PROMPT.txt", DEFAULT_SUMMARY_PROMPT)
+    print("[INIT] Prompt files verified")
+
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
