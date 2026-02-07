@@ -12,6 +12,14 @@ export interface ChatRequest {
 class APIService {
   private abortController: AbortController | null = null;
 
+  private async handleResponse(res: Response) {
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`API Error ${res.status}: ${text || res.statusText}`);
+    }
+    return res.json();
+  }
+
   async *chat(request: ChatRequest): AsyncGenerator<string> {
     this.abortController = new AbortController();
     try {
@@ -70,7 +78,7 @@ class APIService {
   async getShows(): Promise<Show[]> {
     try {
       const res = await fetch(`${API_BASE}/shows`);
-      return res.json();
+      return res.ok ? res.json() : [];
     } catch { return []; }
   }
 
@@ -80,7 +88,7 @@ class APIService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
+    return this.handleResponse(res);
   }
 
   async updateShow(id: string, data: Partial<Show>): Promise<Show> {
@@ -89,7 +97,7 @@ class APIService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
+    return this.handleResponse(res);
   }
 
   async deleteShow(id: string): Promise<void> {
@@ -100,7 +108,7 @@ class APIService {
   async getInstances(): Promise<Instance[]> {
     try {
       const res = await fetch(`${API_BASE}/instances`);
-      return res.json();
+      return res.ok ? res.json() : [];
     } catch { return []; }
   }
 
@@ -110,7 +118,7 @@ class APIService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ showId }),
     });
-    return res.json();
+    return this.handleResponse(res);
   }
 
   async updateInstance(id: string, data: Partial<Instance>): Promise<Instance> {
@@ -119,7 +127,7 @@ class APIService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
+    return this.handleResponse(res);
   }
 
   async deleteInstance(id: string): Promise<void> {
@@ -132,15 +140,56 @@ class APIService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages, model }),
     });
-    return res.json();
+    return this.handleResponse(res);
   }
 
   async healthCheck(): Promise<boolean> {
-    try { return (await fetch(`${API_BASE}/health`)).ok; }
+    try {
+        const res = await fetch(`${API_BASE}/health`);
+        return res.ok;
+    }
     catch { return false; }
   }
 }
 
-
-
 export const api = new APIService();
+
+export interface Message {
+  id: string;
+  role: 'user' | 'ai' | 'assistant';
+  content: string;
+}
+
+export interface Episode {
+  id: string;
+  name: string;
+  context: string;
+}
+
+export interface Show {
+  id: string;
+  name: string;
+  description: string;
+  lore: string;
+  profile: string;
+  episodes: Episode[];
+}
+
+export interface InstanceSummary {
+  episodeName: string;
+  summary: string;
+  timestamp: string;
+}
+
+export interface Instance {
+  id: string;
+  showId: string;
+  showName: string;
+  currentEpisodeIndex: number;
+  messages: Message[];
+  lastPlayed: string;
+  lore: string;
+  profile: string;
+  episodes: Episode[];
+  summaryHistory: InstanceSummary[];
+}
