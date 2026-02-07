@@ -32,6 +32,7 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1"
 _env_model = os.getenv('OPENROUTER_MODEL')
 CHAT_MODEL = _env_model if _env_model else 'anthropic/claude-sonnet-4'
 SUMMARY_MODEL = _env_model if _env_model else 'anthropic/claude-sonnet-4'
+COST_SAVING_MODE = os.getenv('COST_SAVING_MODE', 'true').lower() in {'1', 'true', 'yes', 'on'}
 
 # Directory Setup
 BASE_DIR = Path(__file__).parent
@@ -120,7 +121,7 @@ def stream_openrouter(messages, model):
             "model": model,
             "messages": messages,
             "stream": True,
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "temperature": 1.0,
             "top_p": 0.95,
         }
@@ -196,6 +197,146 @@ def call_summary_api(transcript_text):
         return f"• Summary generation error: {str(e)}"
 
 
+def split_transcript_into_chunks(transcript_text, max_chars=3600):
+    if not transcript_text:
+        return []
+    paragraphs = [p.strip() for p in transcript_text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        return [transcript_text[i:i + max_chars] for i in range(0, len(transcript_text), max_chars)]
+
+    chunks = []
+    current = []
+    current_len = 0
+    scene_markers = ("SCENE", "CUT TO", "INT.", "EXT.")
+
+    def flush_current():
+        nonlocal current, current_len
+        if not current:
+            return
+        block = "\n\n".join(current)
+        if len(block) <= max_chars:
+            chunks.append(block)
+        else:
+            for i in range(0, len(block), max_chars):
+                chunks.append(block[i:i + max_chars])
+        current = []
+        current_len = 0
+
+    for paragraph in paragraphs:
+        if current and paragraph.startswith(scene_markers):
+            flush_current()
+        paragraph_len = len(paragraph) + 2
+        if current and current_len + paragraph_len > max_chars:
+            flush_current()
+        current.append(paragraph)
+        current_len += paragraph_len
+
+    flush_current()
+    return chunks
+
+
+def get_episode_context(instance):
+    ep_idx = instance.get('currentEpisodeIndex', 0)
+    episodes = instance.get('episodes', [])
+    ep_context = ""
+    ep_name = f"Episode {ep_idx + 1}"
+    if ep_idx < len(episodes):
+        current_ep = episodes[ep_idx]
+        ep_name = current_ep.get('name', ep_name)
+        ep_context = current_ep.get('context', '').strip()
+    return ep_idx, ep_name, ep_context
+
+
+def get_episode_chunks(instance):
+    ep_idx, ep_name, ep_context = get_episode_context(instance)
+    chunks = split_transcript_into_chunks(ep_context)
+    return ep_idx, ep_name, ep_context, chunks
+
+
+def ensure_transcript_state(instance, chunk_count):
+    ep_idx = instance.get('currentEpisodeIndex', 0)
+    progress = instance.setdefault('transcript_progress', {})
+    if progress.get('episodeIndex') != ep_idx:
+        progress['episodeIndex'] = ep_idx
+        progress['chunkIndex'] = 0
+    if 'chunkIndex' not in progress:
+        progress['chunkIndex'] = 0
+    current_chunk_id = instance.get('current_chunk_id', progress['chunkIndex'])
+    if current_chunk_id >= chunk_count and chunk_count > 0:
+        current_chunk_id = chunk_count - 1
+    current_chunk_id = max(0, current_chunk_id)
+    instance['current_chunk_id'] = current_chunk_id
+    progress['chunkIndex'] = current_chunk_id
+    instance.setdefault('played_segments', [])
+    instance.setdefault('chunkSummaries', {})
+    return current_chunk_id
+
+
+def get_chunk_summaries(instance, episode_index, up_to_index):
+    if up_to_index <= 0:
+        return []
+    chunk_summaries = instance.get('chunkSummaries', {})
+    ep_key = str(episode_index)
+    summaries = chunk_summaries.get(ep_key, [])
+    return [s for s in summaries[:up_to_index] if s]
+
+
+def update_chunk_summary(instance, episode_index, chunk_index, chunk_text):
+    if not chunk_text:
+        return
+    chunk_summaries = instance.setdefault('chunkSummaries', {})
+    ep_key = str(episode_index)
+    ep_list = chunk_summaries.get(ep_key, [])
+    while len(ep_list) <= chunk_index:
+        ep_list.append("")
+    if not ep_list[chunk_index]:
+        ep_list[chunk_index] = call_summary_api(chunk_text)
+    chunk_summaries[ep_key] = ep_list
+
+
+def update_rolling_summary(instance, max_history):
+    messages = instance.get('messages', [])
+    if len(messages) <= max_history:
+        return
+    target_count = len(messages) - max_history
+    if target_count <= 0:
+        return
+    if instance.get('rollingSummaryCount') == target_count and instance.get('rollingSummary'):
+        return
+    transcript_lines = []
+    for msg in messages[:target_count]:
+        role = msg.get('role', 'user')
+        role_label = 'USER' if role in {'user'} else 'STORY'
+        transcript_lines.append(f"{role_label}:\n{msg.get('content', '')}")
+    transcript_text = "\n\n".join(transcript_lines).strip()
+    if not transcript_text:
+        return
+    instance['rollingSummary'] = call_summary_api(transcript_text)
+    instance['rollingSummaryCount'] = target_count
+
+
+def advance_transcript_progress(instance, episode_index, chunk_index):
+    ep_idx, _, ep_context, chunks = get_episode_chunks(instance)
+    if ep_idx != episode_index:
+        return
+    if not chunks:
+        instance['current_chunk_id'] = 0
+        instance.setdefault('transcript_progress', {})['chunkIndex'] = 0
+        return
+    current_chunk_index = max(0, min(chunk_index, len(chunks) - 1))
+    played_segments = instance.setdefault('played_segments', [])
+    if current_chunk_index not in played_segments:
+        played_segments.append(current_chunk_index)
+    update_chunk_summary(instance, ep_idx, current_chunk_index, chunks[current_chunk_index])
+    next_chunk = current_chunk_index + 1
+    if next_chunk >= len(chunks):
+        next_chunk = len(chunks) - 1
+    instance['current_chunk_id'] = next_chunk
+    progress = instance.setdefault('transcript_progress', {})
+    progress['episodeIndex'] = ep_idx
+    progress['chunkIndex'] = next_chunk
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #                         PROMPT CHAIN BUILDER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -206,10 +347,11 @@ def build_prompt_chain(instance):
 
     Structure:
       1. SYSTEM: Anchor + System Prompt
-      2. Context block: lore + profile + summaries + episode transcript (EVERY turn)
-      3. Synthetic acknowledgment
-      4. Conversation history (trimmed, all but last message)
-      5. Final user message + reinforcement
+      2. Short persistent context (lore + profile + optional summary)
+      3. Rolling summary + previous chunk summaries (if any)
+      4. Current transcript chunk only
+      5. Last assistant message + recent history
+      6. Final user message + reinforcement
     """
     messages = []
 
@@ -221,91 +363,94 @@ def build_prompt_chain(instance):
         "content": f"{anchor}\n\n{system_prompt}"
     })
 
-    # ─── 2. PERSISTENT CONTEXT BLOCK (sent EVERY turn) ───────────────────
+    # Episode context + chunks
+    ep_idx, ep_name, ep_context, chunks = get_episode_chunks(instance)
+    current_chunk_id = ensure_transcript_state(instance, len(chunks))
+    current_chunk = chunks[current_chunk_id] if chunks else ""
+
+    # ─── 2. PERSISTENT CONTEXT (minimal) ─────────────────────────────────
     context_parts = []
 
-    # World lore
     lore = instance.get('lore', '').strip()
     if lore:
         context_parts.append(f"<world_lore>\n{lore}\n</world_lore>")
 
-    # Character profile
     profile = instance.get('profile', '').strip()
     if profile:
         context_parts.append(f"<user_character>\n{profile}\n</user_character>")
 
-    # Previous episode summaries
     summaries = instance.get('summaryHistory', [])
-    if summaries:
-        summary_lines = []
-        for s in summaries:
-            ep_name = s.get('episodeName', 'Unknown Episode')
-            ep_summary = s.get('summary', '(No summary available)')
-            summary_lines.append(f"### {ep_name}\n{ep_summary}")
+    is_episode_start = len(
+        [m for m in instance.get('messages', []) if m.get('role') in {'assistant', 'ai'}]
+    ) == 0
+    if summaries and is_episode_start:
+        last_summary = summaries[-1]
+        ep_summary = last_summary.get('summary', '(No summary available)')
+        ep_title = last_summary.get('episodeName', 'Previous Episode')
         context_parts.append(
-            "<previous_episodes>\n" + "\n\n".join(summary_lines) + "\n</previous_episodes>"
+            f"<previous_episode_summary>\n### {ep_title}\n{ep_summary}\n</previous_episode_summary>"
         )
 
-    # Episode transcript — ALWAYS included
-    ep_idx = instance.get('currentEpisodeIndex', 0)
-    episodes = instance.get('episodes', [])
-    ep_context = ""
-    ep_name = ""
+    rolling_summary = instance.get('rollingSummary', '').strip()
+    if rolling_summary:
+        context_parts.append(f"<session_summary>\n{rolling_summary}\n</session_summary>")
 
-    if ep_idx < len(episodes):
-        current_ep = episodes[ep_idx]
-        ep_name = current_ep.get('name', f'Episode {ep_idx + 1}')
-        ep_context = current_ep.get('context', '').strip()
-
-    if ep_context:
+    previous_chunk_summaries = get_chunk_summaries(instance, ep_idx, current_chunk_id)
+    if previous_chunk_summaries:
+        recent_summaries = previous_chunk_summaries[-3:]
         context_parts.append(
-            f'<episode_transcript title="{ep_name}">\n'
-            f'{ep_context}\n'
-            f'</episode_transcript>'
+            "<previous_chunks>\n" + "\n\n".join(recent_summaries) + "\n</previous_chunks>"
         )
 
-    # ─── 3. INJECT CONTEXT WITH SYNTHETIC ACK ────────────────────────────
     if context_parts:
-        context_block = "\n\n".join(context_parts)
-        messages.append({"role": "user", "content": context_block})
+        messages.append({"role": "user", "content": "\n\n".join(context_parts)})
+
+    # ─── 3. CURRENT TRANSCRIPT CHUNK ONLY ────────────────────────────────
+    if current_chunk:
         messages.append({
-            "role": "assistant",
+            "role": "user",
             "content": (
-                "Context loaded. I will:\n"
-                "• Follow the episode transcript beat by beat\n"
-                "• Copy NPC dialogue WORD-FOR-WORD\n"
-                "• Use the User's EXACT dialogue (no additions) or zero if none provided\n"
-                "• Prioritize dialogue over description\n"
-                "• Check conversation history to continue from the correct position\n"
-                "• End with an NPC addressing the User's character"
+                f"<episode_chunk title=\"{ep_name}\" index=\"{current_chunk_id + 1}/{max(len(chunks), 1)}\">\n"
+                f"{current_chunk}\n"
+                "</episode_chunk>"
             )
         })
 
-    # ─── 4. CONVERSATION HISTORY (all but last message) ──────────────────
+    # ─── 4. LAST ASSISTANT + RECENT HISTORY ─────────────────────────────
     conv_messages = instance.get('messages', [])
-    MAX_HISTORY = 30  # Increased to help with position tracking
-    if len(conv_messages) > MAX_HISTORY:
-        conv_messages = conv_messages[-MAX_HISTORY:]
+    max_history = 12 if not COST_SAVING_MODE else 8
+    recent_messages = conv_messages[-max_history:] if conv_messages else []
 
-    for msg in conv_messages[:-1]:
-        content = msg.get('content', '').strip()
-        if not content:
-            continue
-        role = 'assistant' if msg.get('role') == 'assistant' else 'user'
-        messages.append({"role": role, "content": content})
+    last_user_msg = ""
+    last_user_index = None
+    if conv_messages and conv_messages[-1].get('role') == 'user':
+        last_user_msg = conv_messages[-1].get('content', '').strip()
+        last_user_index = len(conv_messages) - 1
+
+    last_assistant_msg = ""
+    last_assistant_index = None
+    for i in range(len(conv_messages) - 1, -1, -1):
+        if conv_messages[i].get('role') in {'assistant', 'ai'}:
+            last_assistant_msg = conv_messages[i].get('content', '').strip()
+            last_assistant_index = i
+            break
+
+    if not COST_SAVING_MODE:
+        recent_start = max(0, len(conv_messages) - max_history)
+        for i in range(recent_start, len(conv_messages)):
+            if i == last_user_index or i == last_assistant_index:
+                continue
+            content = conv_messages[i].get('content', '').strip()
+            if not content:
+                continue
+            role = 'assistant' if conv_messages[i].get('role') in {'assistant', 'ai'} else 'user'
+            messages.append({"role": role, "content": content})
+
+    if last_assistant_msg:
+        messages.append({"role": "assistant", "content": last_assistant_msg})
 
     # ─── 5. FINAL USER MESSAGE + REINFORCEMENT ──────────────────────────
-    last_user_msg = ""
-    if conv_messages:
-        last_msg = conv_messages[-1]
-        if last_msg.get('role') == 'user':
-            last_user_msg = last_msg.get('content', '').strip()
-
     reinforcement = load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
-
-    is_episode_start = len(
-        [m for m in instance.get('messages', []) if m.get('role') == 'assistant']
-    ) == 0
 
     final_parts = []
 
@@ -314,33 +459,37 @@ def build_prompt_chain(instance):
     elif is_episode_start:
         final_parts.append(
             "[BEGIN EPISODE]\n"
-            "Start from the top of the transcript. "
+            "Start from the top of the transcript chunk. "
             "Brief scene-setting (1-2 sentences), then get into dialogue immediately. "
             "End with an NPC addressing the User's character."
         )
     else:
         final_parts.append(
             "[CONTINUE]\n"
-            "Continue from where we left off in the transcript. "
-            "Check the conversation history to find your position. "
-            "The User is present. Advance to the next beats. "
+            "Continue from where we left off in the transcript chunk. "
+            "Advance to the next beats in order. "
             "End with an NPC addressing the User's character."
         )
 
     final_parts.append(f"\n{reinforcement}")
     messages.append({"role": "user", "content": "\n\n".join(final_parts)})
 
-    # Debug logging
-    transcript_len = len(ep_context) if ep_context else 0
-    history_count = len(conv_messages)
+    transcript_len = len(current_chunk) if current_chunk else 0
+    history_count = len(recent_messages)
     print(
         f"[CHAIN] Messages: {len(messages)} | "
         f"Episode: {ep_name} | "
-        f"Transcript: {transcript_len} chars | "
+        f"Chunk: {current_chunk_id + 1}/{max(len(chunks), 1)} | "
+        f"ChunkSize: {transcript_len} chars | "
         f"History: {history_count} | "
-        f"Start: {is_episode_start}"
+        f"Start: {is_episode_start} | "
+        f"CostSaving: {COST_SAVING_MODE}"
     )
-    return messages
+    return messages, {
+        "episodeIndex": ep_idx,
+        "chunkIndex": current_chunk_id,
+        "chunkCount": len(chunks)
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -430,6 +579,12 @@ def handle_instances():
             "currentEpisodeIndex": 0,
             "messages": [],
             "summaryHistory": [],
+            "transcript_progress": {"episodeIndex": 0, "chunkIndex": 0},
+            "current_chunk_id": 0,
+            "played_segments": [],
+            "chunkSummaries": {},
+            "rollingSummary": "",
+            "rollingSummaryCount": 0,
             "lastPlayed": datetime.now().isoformat(),
             "lore": show.get('lore', ''),
             "profile": show.get('profile', ''),
@@ -464,7 +619,11 @@ def handle_instance_id(inst_id):
     with open(path, 'r') as f:
         current = json.load(f)
     data = request.json
-    for key in ['messages', 'lore', 'profile', 'currentEpisodeIndex', 'summaryHistory', 'episodes']:
+    for key in [
+        'messages', 'lore', 'profile', 'currentEpisodeIndex', 'summaryHistory', 'episodes',
+        'transcript_progress', 'current_chunk_id', 'played_segments', 'chunkSummaries',
+        'rollingSummary', 'rollingSummaryCount'
+    ]:
         if key in data:
             current[key] = data[key]
     current['lastPlayed'] = datetime.now().isoformat()
@@ -501,6 +660,15 @@ def advance_episode(inst_id):
     })
     inst['currentEpisodeIndex'] += 1
     inst['messages'] = []
+    inst['transcript_progress'] = {
+        "episodeIndex": inst['currentEpisodeIndex'],
+        "chunkIndex": 0
+    }
+    inst['current_chunk_id'] = 0
+    inst['played_segments'] = []
+    inst['chunkSummaries'] = inst.get('chunkSummaries', {})
+    inst['rollingSummary'] = ""
+    inst['rollingSummaryCount'] = 0
     inst['lastPlayed'] = datetime.now().isoformat()
 
     with open(path, 'w') as f:
@@ -550,7 +718,8 @@ def chat():
             with open(path, 'w') as f:
                 json.dump(inst, f, indent=2)
 
-    prompt_msgs = build_prompt_chain(inst)
+    update_rolling_summary(inst, 12 if not COST_SAVING_MODE else 8)
+    prompt_msgs, prompt_meta = build_prompt_chain(inst)
 
     def generate():
         full_response = ""
@@ -574,6 +743,13 @@ def chat():
                     "role": "assistant",
                     "content": full_response
                 })
+                update_rolling_summary(current_inst, 12 if not COST_SAVING_MODE else 8)
+                if prompt_meta:
+                    advance_transcript_progress(
+                        current_inst,
+                        prompt_meta.get('episodeIndex', current_inst.get('currentEpisodeIndex', 0)),
+                        prompt_meta.get('chunkIndex', current_inst.get('current_chunk_id', 0))
+                    )
                 current_inst['lastPlayed'] = datetime.now().isoformat()
                 with open(path, 'w') as f:
                     json.dump(current_inst, f, indent=2)
