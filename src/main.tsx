@@ -121,13 +121,6 @@ class APIService {
     return res.json();
   }
 
-  stop() {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
-    }
-  }
-
   async *chat(request: any): AsyncGenerator<string> {
     this.abortController = new AbortController();
     try {
@@ -162,8 +155,6 @@ class APIService {
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
       throw error;
-    } finally {
-      this.abortController = null;
     }
   }
 
@@ -519,7 +510,6 @@ function RewindOverlay({ isActive, onComplete, colorTheme, mode = 'rewind' }: an
         const completeTimeout = setTimeout(() => { setPhase('none'); onComplete(); }, 1700);
         return () => { clearTimeout(staticTimeout); clearTimeout(completeTimeout); };
       } else {
-        // Regenerate Mode
         setPhase('static');
         playGlitchSound();
         const completeTimeout = setTimeout(() => { setPhase('none'); onComplete(); }, 400);
@@ -627,7 +617,11 @@ function EditShowModal({ isOpen, onClose, show }: { isOpen: boolean; onClose: ()
 
     if (newEpisodes.length > 0) {
       if (confirm(`Parsed ${newEpisodes.length} episodes. Replace existing chapters?`)) {
-        setName(newName); setEpisodes(newEpisodes); setSelectedEpisodeId(newEpisodes[0].id); setActiveTab('episodes'); setImportText('');
+        setName(newName);
+        setEpisodes(newEpisodes as Episode[]);
+        setSelectedEpisodeId((newEpisodes[0] as Episode).id);
+        setActiveTab('episodes');
+        setImportText('');
       }
     } else { alert("No episodes found. Make sure to use '## Episode Name' to start chapters."); }
   };
@@ -664,7 +658,7 @@ function EditShowModal({ isOpen, onClose, show }: { isOpen: boolean; onClose: ()
         <button onClick={onClose} className="px-4 py-1 hover:bg-white/10 text-gray-500 hover:text-white transition-colors border border-transparent hover:border-gray-600">[CLOSE EDITOR]</button>
       </div>
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-64 border-r border-[var(--border-color)] bg-black/80 flex flex-col shrink-0">
+        <div className="w-64 border-r border-[var(--border-color)] bg-black/30 flex flex-col shrink-0">
           <div className="p-0 flex flex-col h-full">
             <div className="p-3 text-xs font-bold text-gray-600 border-b border-gray-900">CONFIGURATION</div>
             {['general', 'lore', 'profile'].map((tab) => (
@@ -761,7 +755,7 @@ function FinishEpisodeModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/80" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md bg-gray-950 border-2 border-red-900/50 p-6 space-y-6">
         <div className="text-center space-y-2"><div className="text-2xl font-bold tracking-widest text-red-500">EPISODE COMPLETE</div><div className="text-gray-400">"{currentEp.name}"</div></div>
         <div className="text-sm text-gray-500 text-center">{loading ? "Analyzing session..." : isLast ? "Advancing will mark campaign complete." : "Proceed to next chapter? Chat history will be summarized."}</div>
@@ -799,7 +793,7 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
   ];
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/90" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/90 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-gray-950 border-2 border-gray-700 p-6 space-y-6 text-gray-300 shadow-2xl">
         <h2 className="text-xl font-bold tracking-wider border-b border-gray-800 pb-2">SETTINGS</h2>
         <div className="space-y-4">
@@ -827,91 +821,27 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
 function ChatMessage({ message, isStreaming, streamingText, onEdit, onDelete, onRegenerate }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
-
   const content = isStreaming ? streamingText : message.content;
-  const isUser = message.role === 'user';
-
   return (
-    <div
-      className={cn(
-        "relative p-6 border-l-2 transition-all group",
-        isUser ? "border-l-gray-700 bg-white/5" : "border-l-[var(--border-color)] bg-[var(--bg-tint)]"
-      )}
-    >
-      {/* FIXED: Action Menu - Always rendered, sticky, visible during streaming */}
-      {!isEditing && (
-        <div className="sticky top-0 float-right z-20 -mt-2 -mr-2">
-          <div className="flex gap-1 bg-black border border-gray-800 p-1 text-[10px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-200 shadow-xl">
-            <button
-              onClick={() => onRegenerate(message.id)}
-              disabled={isStreaming}
-              className={cn(
-                "px-1.5 py-0.5 text-gray-500 border border-transparent transition-colors",
-                isStreaming
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:text-cyan-400 hover:border-cyan-400/30"
-              )}
-              title="Regenerate"
-            >
-              RGN
-            </button>
-            <button
-              onClick={() => setIsEditing(true)}
-              disabled={isStreaming}
-              className={cn(
-                "px-1.5 py-0.5 text-gray-500 border border-transparent transition-colors",
-                isStreaming
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:text-white hover:border-gray-600"
-              )}
-              title="Edit"
-            >
-              EDT
-            </button>
-            <button
-              onClick={() => onDelete(message.id)}
-              disabled={isStreaming}
-              className={cn(
-                "px-1.5 py-0.5 text-gray-500 border border-transparent transition-colors",
-                isStreaming
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:text-red-500 hover:border-red-500/30"
-              )}
-              title="Delete"
-            >
-              DEL
-            </button>
-          </div>
+    <div className={cn("relative border-l-2 transition-all group", message.role === 'user' ? "border-l-gray-700 bg-white/5" : "border-l-[var(--border-color)] bg-[var(--bg-tint)]")}>
+      {!isStreaming && !isEditing && (
+        <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-1.5 bg-black/90 backdrop-blur-sm border-b border-gray-800/50">
+          <span className={cn("text-xs font-bold tracking-widest uppercase flex items-center gap-2", message.role === 'user' ? 'text-gray-500' : 'text-[var(--glow-color)] text-theme-glow')}>{message.role === 'user' ? '>> PLAYER' : '## NARRATOR'}</span>
+          <div className="flex gap-1 text-[10px] font-mono"><button onClick={() => setIsEditing(true)} className="px-1.5 py-0.5 hover:text-white text-gray-600 border border-transparent hover:border-gray-600 transition-colors">EDT</button><button onClick={() => onRegenerate(message.id)} className="px-1.5 py-0.5 hover:text-[var(--glow-color)] text-gray-600 border border-transparent hover:border-[var(--border-color)] transition-colors">RGN</button><button onClick={() => onDelete(message.id)} className="px-1.5 py-0.5 hover:text-red-500 text-gray-600 border border-transparent hover:border-red-500/30 transition-colors">DEL</button></div>
         </div>
       )}
-
-      {/* HEADER: Role Label */}
-      <div className={cn(
-        "text-xs font-bold tracking-widest mb-3 uppercase flex items-center gap-2 select-none relative z-10",
-        isUser ? 'text-gray-500' : 'text-[var(--glow-color)] text-theme-glow'
-      )}>
-        <span>{isUser ? '>> PLAYER' : '## NARRATOR'}</span>
-        {isStreaming && <span className="animate-pulse">_</span>}
+      {isStreaming && (
+        <div className="sticky top-0 z-10 flex items-center px-4 py-1.5 bg-black/90 backdrop-blur-sm border-b border-gray-800/50">
+          <span className={cn("text-xs font-bold tracking-widest uppercase flex items-center gap-2 text-[var(--glow-color)] text-theme-glow")}>## NARRATOR <span className="inline-block w-2 h-4 bg-[var(--glow-color)] animate-blink" /></span>
+        </div>
+      )}
+      <div className="p-4 pt-3">
+        {isEditing ? (
+          <div className="space-y-2"><textarea value={editContent} onChange={e => setEditContent(e.target.value)} className="w-full h-32 bg-black border border-gray-700 p-2 text-sm text-gray-300 focus:outline-none font-mono" /><div className="flex gap-2"><button onClick={() => { onEdit(message.id, editContent); setIsEditing(false); }} className="px-2 py-1 border border-gray-600 text-xs hover:bg-white/10">SAVE</button><button onClick={() => setIsEditing(false)} className="px-2 py-1 text-gray-500 text-xs">CANCEL</button></div></div>
+        ) : (
+          <div className="text-gray-300 text-sm font-mono leading-relaxed prose prose-invert prose-sm max-w-none whitespace-pre-wrap"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content || ''}</ReactMarkdown>{isStreaming && <span className="inline-block w-2 h-4 bg-[var(--glow-color)] animate-blink align-middle ml-0.5" />}</div>
+        )}
       </div>
-
-      {/* CONTENT */}
-      {isEditing ? (
-        <div className="space-y-2 animate-fade-in relative z-10">
-          <textarea
-            value={editContent}
-            onChange={e => setEditContent(e.target.value)}
-            className="w-full h-32 bg-black border border-gray-700 p-3 text-sm text-gray-300 focus:outline-none font-mono focus:border-[var(--glow-color)]"
-          />
-          <div className="flex gap-2">
-            <button onClick={() => { onEdit(message.id, editContent); setIsEditing(false); }} className="px-3 py-1 border border-green-900 bg-green-900/20 text-green-500 text-xs font-bold hover:bg-green-900/40">SAVE</button>
-            <button onClick={() => setIsEditing(false)} className="px-3 py-1 border border-gray-800 text-gray-500 text-xs hover:text-white">CANCEL</button>
-          </div>
-        </div>
-      ) : (
-        <div className="text-gray-300 text-sm font-mono leading-relaxed prose prose-invert prose-sm max-w-none whitespace-pre-wrap relative z-10">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || ''}</ReactMarkdown>
-        </div>
-      )}
     </div>
   );
 }
@@ -921,7 +851,7 @@ function Sidebar() {
   const [view, setView] = useState<'play' | 'shows'>('play');
   const handleDeleteInstance = async (e: React.MouseEvent, id: string) => { e.stopPropagation(); if(confirm("Delete this save file?")) { await api.deleteInstance(id); dispatch({ type: 'REMOVE_INSTANCE', payload: id }); } };
   return (
-    <div className="w-72 h-full bg-black/90 border-r border-[var(--border-color)] flex flex-col z-10 relative">
+    <div className="w-72 h-full bg-black/40 border-r border-[var(--border-color)] flex flex-col z-10 relative backdrop-blur-sm">
       <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-tint)]"><div className="text-center"><div className="text-lg font-bold tracking-wider mt-1 text-[var(--glow-color)] text-theme-glow">LOREKEEPER</div></div></div>
       <div className="flex border-b border-[var(--border-color)]"><button onClick={() => setView('play')} className={cn("flex-1 py-3 text-xs font-bold transition-all", view === 'play' ? "bg-white/10 text-white" : "opacity-40 hover:opacity-100")}>SAVES</button><button onClick={() => setView('shows')} className={cn("flex-1 py-3 text-xs font-bold transition-all", view === 'shows' ? "bg-white/10 text-white" : "opacity-40 hover:opacity-100")}>BLUEPRINTS</button></div>
       <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
@@ -963,52 +893,25 @@ function ChatArea() {
   const { state, dispatch } = useApp();
   const [input, setInput] = useState('');
   const [rewindingTo, setRewindingTo] = useState<string | null>(null);
-  const [transitionMode, setTransitionMode] = useState<'rewind' | 'regenerate'>('rewind');
+  const [transitionMode, setTransitionMode] = useState<'rewind' | 'regenerate'>('regenerate');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { playMessageSent, playKeyClick } = useSound(state.settings.soundEnabled);
-
   const colors = themeColors[state.settings.colorTheme as keyof typeof themeColors];
   const borderCol = state.settings.colorTheme === 'purple' ? 'border-purple-500' : state.settings.colorTheme === 'cyan' ? 'border-cyan-500' : state.settings.colorTheme === 'green' ? 'border-green-500' : state.settings.colorTheme === 'amber' ? 'border-amber-500' : 'border-red-600';
 
-  useLayoutEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-    }
-  }, [state.messages, state.streamingText]);
+  useLayoutEffect(() => { if (messagesContainerRef.current) messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight; }, [state.messages, state.streamingText]);
 
   const sendToAPI = useCallback(async (userMessage: string, historyOverride?: any[]) => {
     dispatch({ type: 'SET_GENERATING', payload: true });
     let fullResponse = '';
     try {
       const history = historyOverride || state.messages.map(m => ({ role: m.role, content: m.content }));
-      const request = {
-        message: userMessage,
-        model: state.settings.model,
-        instanceId: state.currentInstance?.id,
-        history: history,
-        lore: state.lore,
-        profile: state.profile
-      };
-
-      for await (const token of api.chat(request)) {
-        fullResponse += token;
-        dispatch({ type: 'SET_STREAMING_TEXT', payload: fullResponse });
-      }
-
+      const request = { message: userMessage, model: state.settings.model, instanceId: state.currentInstance?.id, history: history, lore: state.lore, profile: state.profile };
+      for await (const token of api.chat(request)) { fullResponse += token; dispatch({ type: 'SET_STREAMING_TEXT', payload: fullResponse }); }
       dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: fullResponse } });
       dispatch({ type: 'UPDATE_TOKEN_USAGE', payload: { prompt: userMessage.length, response: fullResponse.length } });
-    } catch (error) {
-      if ((error as Error).name !== 'AbortError') {
-         console.error(error);
-         dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: "Error: Backend unreachable or stream failed." } });
-      } else {
-         if (fullResponse) {
-             dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: fullResponse + " [STOPPED]" } });
-         }
-      }
-    }
-    dispatch({ type: 'SET_STREAMING_TEXT', payload: '' });
-    dispatch({ type: 'SET_GENERATING', payload: false });
+    } catch (error) { console.error(error); dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: "Error: Backend unreachable." } }); }
+    dispatch({ type: 'SET_STREAMING_TEXT', payload: '' }); dispatch({ type: 'SET_GENERATING', payload: false });
   }, [dispatch, state.currentInstance, state.messages, state.lore, state.profile, state.settings.model]);
 
   const onRewindComplete = useCallback(() => {
@@ -1018,21 +921,24 @@ function ChatArea() {
     const message = state.messages[index];
     let newMessages;
     let lastUserMessage = '';
-
-    // Logic for Regenerate
-    if (message.role === 'ai') {
-        newMessages = state.messages.slice(0, index);
-        const lastUserIndex = [...newMessages].reverse().findIndex(m => m.role === 'user');
-        if (lastUserIndex !== -1) lastUserMessage = newMessages[newMessages.length - 1 - lastUserIndex].content;
-    } else {
+    if (transitionMode === 'rewind') {
         newMessages = state.messages.slice(0, index + 1);
-        lastUserMessage = message.content;
+        dispatch({ type: 'SET_MESSAGES', payload: newMessages });
+        setRewindingTo(null);
+    } else {
+        if (message.role === 'ai') {
+            newMessages = state.messages.slice(0, index);
+            const lastUserIndex = [...newMessages].reverse().findIndex(m => m.role === 'user');
+            if (lastUserIndex !== -1) lastUserMessage = newMessages[newMessages.length - 1 - lastUserIndex].content;
+        } else {
+            newMessages = state.messages.slice(0, index + 1);
+            lastUserMessage = message.content;
+        }
+        dispatch({ type: 'SET_MESSAGES', payload: newMessages });
+        setRewindingTo(null);
+        setTimeout(() => sendToAPI(lastUserMessage, newMessages.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content }))), 100);
     }
-    dispatch({ type: 'SET_MESSAGES', payload: newMessages });
-    setRewindingTo(null);
-    setTimeout(() => sendToAPI(lastUserMessage, newMessages.map(m => ({ role: m.role, content: m.content }))), 100);
-
-  }, [rewindingTo, state.currentInstance, state.messages, dispatch, sendToAPI]);
+  }, [rewindingTo, state.currentInstance, state.messages, dispatch, sendToAPI, transitionMode]);
 
   const handleSend = () => {
     if (!input.trim() || state.isGenerating || !state.currentInstance) return;
@@ -1042,26 +948,19 @@ function ChatArea() {
     setTimeout(() => sendToAPI(msg), 100);
   };
 
-  const handleStop = () => {
-    api.stop();
-    dispatch({ type: 'SET_GENERATING', payload: false });
-  };
-
   const currentEp = state.currentInstance ? state.currentInstance.episodes[state.currentInstance.currentEpisodeIndex] : null;
   const isFinished = state.currentInstance && !currentEp;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-      <RewindOverlay isActive={rewindingTo !== null} onComplete={onRewindComplete} colorTheme={state.settings.colorTheme} mode="regenerate" />
-
+      <RewindOverlay isActive={rewindingTo !== null} onComplete={onRewindComplete} colorTheme={state.settings.colorTheme} mode={transitionMode} />
       {state.currentInstance && (
-        <div className={cn("p-2 border-b border-gray-800 flex justify-between items-center select-none", colors.primary)}>
+        <div className={cn("p-2 border-b border-gray-800 flex justify-between items-center", colors.primary)}>
           <div><span className="text-xs opacity-50 tracking-widest mr-2">INSTANCE:</span><span className="font-bold">{state.currentInstance.showName}</span></div>
           <div><span className="text-xs opacity-50 tracking-widest mr-2">EPISODE:</span><span className="font-bold">{currentEp ? currentEp.name : "CAMPAIGN COMPLETE"}</span></div>
         </div>
       )}
-
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto custom-scrollbar relative bg-black/20">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto custom-scrollbar relative">
         {!state.currentInstance ? (
           <div className="h-full flex flex-col items-center justify-center opacity-50"><div className="text-4xl mb-4 font-mono tracking-[0.2em] border border-white/20 px-4 py-2">CRISTOL</div><div className="text-xs tracking-widest">SELECT OR START A CAMPAIGN</div></div>
         ) : isFinished ? (
@@ -1070,55 +969,16 @@ function ChatArea() {
           <div className="p-8 text-center opacity-70 mt-10"><div className={cn("text-xl mb-4 font-bold", colors.primary)}>CONTEXT</div><div className="italic text-gray-400 max-w-lg mx-auto leading-relaxed">{currentEp?.context}</div><div className="mt-8 text-sm animate-pulse">Waiting for input...</div></div>
         ) : (
           <div className="divide-y divide-gray-800/50 pb-4">
-             {state.messages.map((m, i) => (
-                <ChatMessage
-                  key={m.id}
-                  message={m}
-                  isStreaming={false}
-                  streamingText=""
-                  onEdit={(id: string,c: string) => dispatch({type: 'UPDATE_MESSAGE', payload: {id, content:c}})}
-                  onDelete={(id: string) => dispatch({type: 'DELETE_MESSAGE', payload: id})}
-                  onRegenerate={(id: string) => { if (state.isGenerating) return; setTransitionMode('regenerate'); setRewindingTo(id); }}
-                />
-             ))}
-             {state.streamingText && (
-               <ChatMessage
-                  message={{id:'stream', role:'ai', content: state.streamingText}}
-                  isStreaming={true}
-                  streamingText={state.streamingText}
-                  onEdit={()=>{}} onDelete={()=>{}} onRegenerate={()=>{}}
-                />
-             )}
+             {state.messages.map((m, i) => ( <ChatMessage key={m.id} message={m} onEdit={(id: string,c: string) => dispatch({type: 'UPDATE_MESSAGE', payload: {id, content:c}})} onDelete={(id: string) => dispatch({type: 'DELETE_MESSAGE', payload: id})} onRegenerate={(id: string) => { if (state.isGenerating) return; setTransitionMode('regenerate'); setRewindingTo(id); }} isLast={i === state.messages.length -1} /> ))}
+             {state.streamingText && <ChatMessage message={{id:'stream', role:'ai', content: state.streamingText}} isStreaming onEdit={()=>{}} onDelete={()=>{}} onRegenerate={()=>{}} />}
           </div>
         )}
       </div>
-
       {state.currentInstance && !isFinished && (
-        <div className="p-4 border-t border-gray-800 bg-[#0a0a0a]">
-           <div className="flex gap-2 relative">
-             <div className="absolute -top-3 left-0 text-[10px] text-gray-500 font-mono">
-               {state.isGenerating ? "STREAMING_ACTIVE // TYPING ENABLED" : "READY"}
-             </div>
-             <textarea
-               value={input}
-               onChange={e => setInput(e.target.value)}
-               onKeyDown={e => {
-                 if(e.key === 'Enter' && e.ctrlKey) {
-                    if (state.isGenerating) return;
-                    handleSend();
-                 } else {
-                    playKeyClick();
-                 }
-               }}
-               className={cn("flex-1 h-20 bg-black border p-3 text-sm focus:outline-none resize-none font-mono text-gray-300", state.isGenerating ? "border-gray-800" : "border-gray-700 focus:" + borderCol)}
-               placeholder={state.isGenerating ? "Typing..." : "Enter action... (Ctrl+Enter)"}
-               autoFocus
-             />
-             {state.isGenerating ? (
-               <button onClick={handleStop} className="px-6 border font-bold text-sm bg-red-900/20 text-red-500 border-red-800 hover:bg-red-900/40 transition-all animate-pulse">STOP</button>
-             ) : (
-               <button onClick={handleSend} disabled={!input.trim()} className={cn("px-6 border font-bold text-sm hover:bg-white/10 transition-all", borderCol, colors.primary)}>SEND</button>
-             )}
+        <div className="p-4 border-t border-gray-800 bg-black/40">
+           <div className="flex gap-2">
+             <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if(e.key === 'Enter' && e.ctrlKey) handleSend(); else playKeyClick(); }} className={cn("flex-1 h-20 bg-black/50 border p-3 text-sm focus:outline-none resize-none", state.isGenerating ? "border-gray-700" : "border-gray-600 focus:" + borderCol)} placeholder="Action... (Ctrl+Enter)" disabled={state.isGenerating} autoFocus />
+             <button onClick={handleSend} disabled={!input.trim() || state.isGenerating} className={cn("px-6 border font-bold text-sm hover:bg-white/10", borderCol, colors.primary)}>{state.isGenerating ? "..." : "SEND"}</button>
            </div>
         </div>
       )}
@@ -1127,28 +987,19 @@ function ChatArea() {
 }
 
 function Header({ onOpenSettings, onFinishEpisode }: any) {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const textColor = state.settings.colorTheme === 'purple' ? 'text-purple-400' : state.settings.colorTheme === 'cyan' ? 'text-cyan-400' : state.settings.colorTheme === 'green' ? 'text-green-400' : state.settings.colorTheme === 'amber' ? 'text-amber-400' : 'text-red-500';
-
+  const borderColor = state.settings.colorTheme === 'purple' ? 'border-purple-500' : state.settings.colorTheme === 'cyan' ? 'border-cyan-500' : state.settings.colorTheme === 'green' ? 'border-green-500' : state.settings.colorTheme === 'amber' ? 'border-amber-500' : 'border-red-600';
   return (
-    <div className="h-12 bg-black border-b border-gray-800 flex items-center justify-between px-4 z-50 shrink-0">
-      <div className={cn("flex items-center gap-3", textColor)}>
-        <div className="text-lg">◈</div>
-        <div className="font-bold tracking-wider">CRISTOL TERMINAL</div>
-        <div className="text-xs text-gray-600 tracking-wider">v4.2</div>
-      </div>
+    <div className={cn("h-12 bg-gray-950/90 border-b-2 border-gray-700 flex items-center justify-between px-4")}>
+      <div className={cn("flex items-center gap-3", textColor)}><div className="text-lg">◈</div><div className="font-bold tracking-wider">CRISTOL TERMINAL</div><div className="text-xs text-gray-600 tracking-widest">v2.0</div></div>
       <div className="flex items-center gap-2">
         {state.currentInstance && state.messages.length > 0 &&
-          <button onClick={onFinishEpisode} className={cn("px-3 py-1.5 text-[10px] font-bold font-mono tracking-wider border border-[var(--border-color)] text-[var(--glow-color)] hover:bg-[var(--bg-tint)] transition-all")}>
+          <button onClick={onFinishEpisode} className={cn("px-3 py-1.5 text-xs font-mono tracking-wider border border-[var(--border-color)] text-[var(--glow-color)] hover:bg-[var(--bg-tint)]")}>
             FINISH EPISODE
           </button>
         }
-        <button onClick={onOpenSettings} className="p-2 text-gray-500 hover:text-white hover:bg-white/10 transition-all group" aria-label="Settings">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:rotate-90 transition-transform duration-500">
-                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-        </button>
+        <button onClick={onOpenSettings} className="p-2 hover:bg-white/10 rounded-full transition-all group"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("w-5 h-5 transition-transform group-hover:rotate-90 duration-300", textColor)}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
       </div>
     </div>
   );
@@ -1160,39 +1011,19 @@ function MainLayout() {
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
 
   return (
-    <div
-      className={cn(
-        "flex h-screen w-screen overflow-hidden bg-black text-gray-200 font-sans selection:bg-[var(--glow-color)] selection:text-white",
-        `theme-${state.settings.colorTheme}`
-      )}
-      data-theme={state.settings.colorTheme}
-      data-vfx={state.settings.crtEffects ? "enabled" : "disabled"}
-      style={{
-        // FIXED: Remove all blur-causing properties
-        imageRendering: 'crisp-edges',
-        WebkitFontSmoothing: 'antialiased',
-        MozOsxFontSmoothing: 'grayscale'
-      }}
-    >
+    <div className={cn("flex h-screen w-screen overflow-hidden bg-black text-gray-200 font-sans selection:bg-[var(--glow-color)] selection:text-white", `theme-${state.settings.colorTheme}`)} data-theme={state.settings.colorTheme} data-vfx={state.settings.crtEffects ? "enabled" : "disabled"}>
       <CRTOverlay />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <EditShowModal isOpen={!!state.editingShow} onClose={() => dispatch({ type: 'SET_EDITING_SHOW', payload: null })} show={state.editingShow} />
       <FinishEpisodeModal isOpen={isFinishModalOpen} onClose={() => setIsFinishModalOpen(false)} />
 
       {state.settings.enablePerspective ? (
-        <div className="perspective-container" style={{ height: '100vh', width: '100vw', overflow: 'hidden' }}>
-          <div className="crt-monitor" style={{
-            "--tilt-x": "0deg",
-            "--scale": "0.95",
-            "--curve": "10px",
-            // FIXED: Remove transform-based blur
-            transform: 'translateZ(0)',
-            willChange: 'transform'
-          } as React.CSSProperties}>
+        <div className="perspective-container">
+          <div className="crt-monitor" style={{ "--tilt-x": "0deg", "--scale": "0.95", "--curve": "10px" } as React.CSSProperties}>
              <div className="monitor-glare" />
              <div className="flex flex-col h-full bg-black relative z-10">
                <Header onOpenSettings={() => setIsSettingsOpen(true)} onFinishEpisode={() => setIsFinishModalOpen(true)} />
-               <div className="flex-1 flex overflow-hidden min-h-0">
+               <div className="flex-1 flex overflow-hidden">
                  <Sidebar />
                  <ChatArea />
                </div>
@@ -1200,9 +1031,9 @@ function MainLayout() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col h-full w-full relative z-10 overflow-hidden">
+        <div className="flex flex-col h-full relative z-10">
           <Header onOpenSettings={() => setIsSettingsOpen(true)} onFinishEpisode={() => setIsFinishModalOpen(true)} />
-          <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className="flex-1 flex overflow-hidden">
             <Sidebar />
             <ChatArea />
           </div>
@@ -1212,4 +1043,10 @@ function MainLayout() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<AppProvider><MainLayout /></AppProvider>);
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <AppProvider>
+      <MainLayout />
+    </AppProvider>
+  </React.StrictMode>
+);
