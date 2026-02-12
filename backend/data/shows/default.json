@@ -1,0 +1,14 @@
+{
+  "id": "default",
+  "name": "New Story",
+  "description": "A new adventure template.",
+  "lore": "The world is vast and unknown...",
+  "profile": "You are a traveler...",
+  "episodes": [
+    {
+      "id": "e1",
+      "name": "Chapter 1",
+      "context": "The journey begins."
+    }
+  ]
+}
