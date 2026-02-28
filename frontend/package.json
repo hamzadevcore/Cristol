@@ -3,8 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "main.cjs",
   "description": "Retro CRT Roleplay.",
   "scripts": {
+    "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
@@ -24,6 +26,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
     "concurrently": "^8.2.2",
+    "electron": "^40.6.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.2.4",

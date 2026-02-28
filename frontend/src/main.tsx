@@ -108,7 +108,7 @@ export interface AppState {
 // 3. API SERVICE
 // ==========================================
 
-const API_BASE = ''; // Empty string means "use the same domain I'm currently on"
+const API_BASE = 'http://localhost:5000';
 
 export class APIService {
   private abortController: AbortController | null = null;
@@ -990,10 +990,14 @@ export function ChatArea() {
 
   useLayoutEffect(() => {
     if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      // Only auto-scroll if within 100px of the bottom
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+      if (isAtBottom) {
+        messagesContainerRef.current.scrollTop = scrollHeight;
+      }
     }
   }, [state.messages, state.streamingText]);
-
   const sendToAPI = useCallback(async (userMessage: string, historyOverride?: any[]) => {
     dispatch({ type: 'SET_GENERATING', payload: true });
     let fullResponse = '';
