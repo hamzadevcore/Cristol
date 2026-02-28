@@ -1,14 +1,7 @@
 import "./index.css";
 import React, {
-  createContext,
-  useContext,
-  useReducer,
-  useEffect,
-  useState,
-  useRef,
-  useCallback,
-  useLayoutEffect,
-  ReactNode
+  createContext, useContext, useReducer, useEffect, useState, useRef,
+  useCallback, useLayoutEffect, ReactNode
 } from 'react';
 import ReactDOM from 'react-dom/client';
 import { clsx, type ClassValue } from "clsx";
@@ -16,391 +9,145 @@ import { twMerge } from "tailwind-merge";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-// ==========================================
-// 1. UTILS & CONSTANTS
-// ==========================================
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
 const themeColors = {
-  purple: { primary: 'text-purple-400', secondary: 'text-purple-500', bg: 'bg-purple-500', bgOpacity: 'bg-purple-500/50', via: 'via-purple-500/50' },
-  cyan: { primary: 'text-cyan-400', secondary: 'text-cyan-500', bg: 'bg-cyan-500', bgOpacity: 'bg-cyan-500/50', via: 'via-cyan-500/50' },
-  green: { primary: 'text-green-400', secondary: 'text-green-500', bg: 'bg-green-500', bgOpacity: 'bg-green-500/50', via: 'via-green-500/50' },
-  amber: { primary: 'text-amber-400', secondary: 'text-amber-500', bg: 'bg-amber-500', bgOpacity: 'bg-amber-500/50', via: 'via-amber-500/50' },
-  hell: { primary: 'text-red-500', secondary: 'text-red-600', bg: 'bg-red-600', bgOpacity: 'bg-red-600/50', via: 'via-red-600/50' },
+  purple: { primary: 'text-purple-400', bg: 'bg-purple-500', bgOpacity: 'bg-purple-500/50', via: 'via-purple-500/50' },
+  cyan: { primary: 'text-cyan-400', bg: 'bg-cyan-500', bgOpacity: 'bg-cyan-500/50', via: 'via-cyan-500/50' },
+  green: { primary: 'text-green-400', bg: 'bg-green-500', bgOpacity: 'bg-green-500/50', via: 'via-green-500/50' },
+  amber: { primary: 'text-amber-400', bg: 'bg-amber-500', bgOpacity: 'bg-amber-500/50', via: 'via-amber-500/50' },
+  mono: { primary: 'text-gray-300', bg: 'bg-gray-500', bgOpacity: 'bg-gray-500/50', via: 'via-gray-500/50' },
+  hell: { primary: 'text-red-500', bg: 'bg-red-600', bgOpacity: 'bg-red-600/50', via: 'via-red-600/50' },
 };
 
-// ==========================================
-// 2. TYPES
-// ==========================================
+// === TYPES ===
+export interface Message { id: string; role: 'user' | 'ai' | 'assistant'; content: string; }
+export interface Episode { id: string; name: string; description?: string; context: string; }
+export interface Show { id: string; name: string; description: string; lore: string; profile: string; episodes: Episode[]; }
+export interface InstanceSummary { episodeName: string; summary: string; timestamp: string; }
+export interface Instance { id: string; showId: string; showName: string; currentEpisodeIndex: number; messages: Message[]; lastPlayed: string; lore: string; profile: string; episodes: Episode[]; summaryHistory: InstanceSummary[]; }
+export interface Settings { model: string; summarizationModel: string; systemPrompt: string; apiKey: string; colorTheme: 'purple' | 'cyan' | 'green' | 'amber' | 'mono' | 'hell'; crtEffects: boolean; enablePerspective: boolean; scanlines: boolean; fishbowlIntensity: number; soundEnabled: boolean; flickerEnabled: boolean; }
+export interface AppState { activePanel: string; shows: Show[]; instances: Instance[]; currentInstance: Instance | null; messages: Message[]; isGenerating: boolean; streamingText: string; tokenUsage: { prompt: number; response: number; total: number }; settings: Settings; editingShow: Show | null | undefined; lore: string; profile: string; }
 
-export interface Message {
-  id: string;
-  role: 'user' | 'ai' | 'assistant';
-  content: string;
-}
-
-export interface Episode {
-  id: string;
-  name: string;
-  description?: string;
-  context: string;
-}
-
-export interface Show {
-  id: string;
-  name: string;
-  description: string;
-  lore: string;
-  profile: string;
-  episodes: Episode[];
-}
-
-export interface InstanceSummary {
-  episodeName: string;
-  summary: string;
-  timestamp: string;
-}
-
-export interface Instance {
-  id: string;
-  showId: string;
-  showName: string;
-  currentEpisodeIndex: number;
-  messages: Message[];
-  lastPlayed: string;
-  lore: string;
-  profile: string;
-  episodes: Episode[];
-  summaryHistory: InstanceSummary[];
-}
-
-export interface Settings {
-  model: string;
-  summarizationModel: string;
-  colorTheme: 'purple' | 'cyan' | 'green' | 'amber' | 'hell';
-  crtEffects: boolean;
-  enablePerspective: boolean;
-  scanlines: boolean;
-  fishbowlIntensity: number;
-  soundEnabled: boolean;
-  flickerEnabled: boolean;
-}
-
-export interface AppState {
-  activePanel: 'instances' | 'shows' | 'lore' | 'profile';
-  shows: Show[];
-  instances: Instance[];
-  currentInstance: Instance | null;
-  messages: Message[];
-  isGenerating: boolean;
-  streamingText: string;
-  tokenUsage: { prompt: number; response: number; total: number };
-  settings: Settings;
-  editingShow: Show | null | undefined;
-  lore: string;
-  profile: string;
-}
-
-// ==========================================
-// 3. API SERVICE
-// ==========================================
-
-const API_BASE = ''; // Empty string means "use the same domain I'm currently on"
-
+// === API ===
+const API_BASE = 'http://localhost:5000';
 export class APIService {
-  private abortController: AbortController | null = null;
+  private ac: AbortController | null = null;
+  private async hr(r: Response) { if (!r.ok) { const t = await r.text(); throw new Error(`API Error ${r.status}: ${t || r.statusText}`); } return r.json(); }
+  stop() { if (this.ac) { this.ac.abort(); this.ac = null; } }
 
-  private async handleResponse(res: Response) {
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`API Error ${res.status}: ${text || res.statusText}`);
-    }
-    return res.json();
-  }
-
-  stop() {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
-    }
-  }
-
-  async *chat(request: any): AsyncGenerator<string> {
-    this.abortController = new AbortController();
+  async *chat(req: any): AsyncGenerator<string> {
+    this.ac = new AbortController();
     try {
-      const response = await fetch(`${API_BASE}/chat`, {
+      const payload = {
+        ...req,
+        system_prompt: req.systemPrompt,
+        instance_id: req.instanceId
+      };
+
+      const r = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-        signal: this.abortController.signal,
+        body: JSON.stringify(payload),
+        signal: this.ac.signal
       });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-      const decoder = new TextDecoder();
-      let buffer = '';
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const reader = r.body?.getReader(); if (!reader) throw new Error('No body');
+      const dec = new TextDecoder(); let buf = '';
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') return;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.token) yield parsed.token;
-            } catch { yield data; }
-          }
-        }
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true }); const lines = buf.split('\n'); buf = lines.pop() || '';
+        for (const l of lines) { if (l.startsWith('data: ')) { const d = l.slice(6); if (d === '[DONE]') return; try { const p = JSON.parse(d); if (p.token) yield p.token; } catch { yield d; } } }
       }
-    } catch (error) {
-      if ((error as Error).name === 'AbortError') return;
-      throw error;
-    } finally {
-      this.abortController = null;
-    }
+    } catch (e) { if ((e as Error).name === 'AbortError') return; throw e; } finally { this.ac = null; }
   }
 
-  // --- Shows ---
-  async getShows(): Promise<Show[]> {
+  async getShows(): Promise<Show[]> { try { const r = await fetch(`${API_BASE}/shows`); return r.ok ? r.json() : []; } catch { return []; } }
+  async createShow(d: Partial<Show>) { return this.hr(await fetch(`${API_BASE}/shows`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })); }
+  async updateShow(id: string, d: Partial<Show>) { return this.hr(await fetch(`${API_BASE}/shows/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })); }
+  async deleteShow(id: string) { await fetch(`${API_BASE}/shows/${id}`, { method: 'DELETE' }); }
+  async getInstances(): Promise<Instance[]> { try { const r = await fetch(`${API_BASE}/instances`); return r.ok ? r.json() : []; } catch { return []; } }
+  async createInstance(showId: string) { return this.hr(await fetch(`${API_BASE}/instances`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ showId }) })); }
+  async updateInstance(id: string, d: Partial<Instance>) { return this.hr(await fetch(`${API_BASE}/instances/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })); }
+  async deleteInstance(id: string) { await fetch(`${API_BASE}/instances/${id}`, { method: 'DELETE' }); }
+  async advanceInstance(id: string, m: Message[], model: string) { return this.hr(await fetch(`${API_BASE}/instances/${id}/advance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: m, model }) })); }
+
+  async updateEnvSettings(s: any) {
     try {
-      const res = await fetch(`${API_BASE}/shows`);
-      return res.ok ? res.json() : [];
-    } catch { return []; }
+      await fetch(`${API_BASE}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: s.model,
+          system_prompt: s.systemPrompt,
+          summarization_model: s.summarizationModel,
+          api_key: s.apiKey
+        })
+      });
+    } catch {}
   }
 
-  async createShow(data: Partial<Show>): Promise<Show> {
-    const res = await fetch(`${API_BASE}/shows`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return this.handleResponse(res);
-  }
-
-  async updateShow(id: string, data: Partial<Show>): Promise<Show> {
-    const res = await fetch(`${API_BASE}/shows/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return this.handleResponse(res);
-  }
-
-  async deleteShow(id: string): Promise<void> {
-    await fetch(`${API_BASE}/shows/${id}`, { method: 'DELETE' });
-  }
-
-  // --- Instances ---
-  async getInstances(): Promise<Instance[]> {
+  async getEnvSettings() {
     try {
-      const res = await fetch(`${API_BASE}/instances`);
-      return res.ok ? res.json() : [];
-    } catch { return []; }
+      const r = await fetch(`${API_BASE}/settings`);
+      if (r.ok) {
+        const d = await r.json();
+        return {
+          model: d.model,
+          systemPrompt: d.system_prompt || d.systemPrompt,
+          summarizationModel: d.summarization_model || d.summarizationModel,
+          apiKey: d.api_key || d.apiKey || ''
+        };
+      }
+      return {};
+    } catch { return {}; }
   }
-
-  async createInstance(showId: string): Promise<Instance> {
-    const res = await fetch(`${API_BASE}/instances`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ showId }),
-    });
-    return this.handleResponse(res);
-  }
-
-  async updateInstance(id: string, data: Partial<Instance>): Promise<Instance> {
-    const res = await fetch(`${API_BASE}/instances/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return this.handleResponse(res);
-  }
-
-  async deleteInstance(id: string): Promise<void> {
-    await fetch(`${API_BASE}/instances/${id}`, { method: 'DELETE' });
-  }
-
-  async advanceInstance(id: string, messages: Message[], model: string) {
-    const res = await fetch(`${API_BASE}/instances/${id}/advance`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, model }),
-    });
-    return this.handleResponse(res);
-  }
-
-  async healthCheck(): Promise<boolean> {
-    try { const res = await fetch(`${API_BASE}/health`); return res.ok; }
-    catch { return false; }
-  }
+  async healthCheck() { try { return (await fetch(`${API_BASE}/health`)).ok; } catch { return false; } }
 }
-
 export const api = new APIService();
 
-// ==========================================
-// 4. HOOKS
-// ==========================================
-
+// === HOOKS ===
 function useSound(enabled: boolean) {
-  const audioContextRef = useRef<AudioContext | null>(null);
-
-  const getAudioContext = useCallback(() => {
-    if (!audioContextRef.current) audioContextRef.current = new AudioContext();
-    return audioContextRef.current;
-  }, []);
-
-  const playStaticNoise = useCallback((duration: number = 0.3) => {
-    if (!enabled) return;
-    const ctx = getAudioContext();
-    const bufferSize = ctx.sampleRate * duration;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.15;
-    const source = ctx.createBufferSource();
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 3000;
-    source.buffer = buffer;
-    source.connect(filter);
-    filter.connect(ctx.destination);
-    source.start();
-  }, [enabled, getAudioContext]);
-
-  const playRewindSound = useCallback(() => {
-    if (!enabled) return;
-    const ctx = getAudioContext();
-    const duration = 1.5;
-    const bufferSize = ctx.sampleRate * duration;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      const t = i / ctx.sampleRate;
-      const freq = 200 + Math.sin(t * 50) * 100;
-      data[i] = Math.sin(t * freq * Math.PI * 2) * 0.1 * (1 - t / duration);
-      data[i] += (Math.random() * 2 - 1) * 0.05;
-    }
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start();
-  }, [enabled, getAudioContext]);
-
-  const playGlitchSound = useCallback(() => {
-    if (!enabled) return;
-    const ctx = getAudioContext();
-    const duration = 0.5;
-    const bufferSize = ctx.sampleRate * duration;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      const t = i / ctx.sampleRate;
-      data[i] = Math.floor((Math.random() * 2 - 1) * 8) / 8 * 0.2 * (1 - t / duration);
-    }
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start();
-  }, [enabled, getAudioContext]);
-
-  const playKeyClick = useCallback(() => {
-    if (!enabled) return;
-    const ctx = getAudioContext();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.type = 'square';
-    oscillator.frequency.value = 1200;
-    gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.05);
-  }, [enabled, getAudioContext]);
-
-  const playMessageSent = useCallback(() => {
-    if (!enabled) return;
-    const ctx = getAudioContext();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(600, ctx.currentTime);
-    oscillator.frequency.setValueAtTime(800, ctx.currentTime + 0.05);
-    gainNode.gain.setValueAtTime(0.08, ctx.currentTime);
-    gainNode.gain.setValueAtTime(0.001, ctx.currentTime + 0.1);
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.1);
-  }, [enabled, getAudioContext]);
-
+  const ref = useRef<AudioContext | null>(null);
+  const ctx = useCallback(() => { if (!ref.current) ref.current = new AudioContext(); return ref.current; }, []);
+  const playStaticNoise = useCallback((dur = 0.3) => { if (!enabled) return; const c = ctx(); const b = c.createBuffer(1, c.sampleRate * dur, c.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.15; const s = c.createBufferSource(); const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 3000; s.buffer = b; s.connect(f); f.connect(c.destination); s.start(); }, [enabled, ctx]);
+  const playRewindSound = useCallback(() => { if (!enabled) return; const c = ctx(); const dur = 1.5; const b = c.createBuffer(1, c.sampleRate * dur, c.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) { const t = i / c.sampleRate; d[i] = Math.sin(t * (200 + Math.sin(t * 50) * 100) * Math.PI * 2) * 0.1 * (1 - t / dur) + (Math.random() * 2 - 1) * 0.05; } const s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start(); }, [enabled, ctx]);
+  const playGlitchSound = useCallback(() => { if (!enabled) return; const c = ctx(); const dur = 0.5; const b = c.createBuffer(1, c.sampleRate * dur, c.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) { const t = i / c.sampleRate; d[i] = Math.floor((Math.random() * 2 - 1) * 8) / 8 * 0.2 * (1 - t / dur); } const s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start(); }, [enabled, ctx]);
+  const playKeyClick = useCallback(() => { if (!enabled) return; const c = ctx(); const o = c.createOscillator(); const g = c.createGain(); o.type = 'square'; o.frequency.value = 1200; g.gain.setValueAtTime(0.05, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.05); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.05); }, [enabled, ctx]);
+  const playMessageSent = useCallback(() => { if (!enabled) return; const c = ctx(); const o = c.createOscillator(); const g = c.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(600, c.currentTime); o.frequency.setValueAtTime(800, c.currentTime + 0.05); g.gain.setValueAtTime(0.08, c.currentTime); g.gain.setValueAtTime(0.001, c.currentTime + 0.1); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.1); }, [enabled, ctx]);
   return { playStaticNoise, playRewindSound, playGlitchSound, playKeyClick, playMessageSent };
 }
 
-// ==========================================
-// 5. CONTEXT
-// ==========================================
+// === CONTEXT ===
+const STORAGE_KEY = 'cristol-v4';
+const defaultSettings: Settings = { model: '', summarizationModel: '', systemPrompt: 'You are a creative narrator for an interactive story. Respond in character, be descriptive and engaging.', apiKey: '', colorTheme: 'green', crtEffects: true, enablePerspective: true, scanlines: true, fishbowlIntensity: 0.15, soundEnabled: true, flickerEnabled: true };
+export const initialState: AppState = { messages: [], currentInstance: null, isGenerating: false, streamingText: '', tokenUsage: { prompt: 0, response: 0, total: 0 }, settings: defaultSettings, activePanel: 'instances', lore: '', profile: '', shows: [], instances: [], editingShow: undefined };
 
-const STORAGE_KEY = 'cristol-terminal-save-v1';
-
-const defaultSettings: Settings = {
-  model: '',
-  summarizationModel: '',
-  colorTheme: 'green',
-  crtEffects: true,
-  enablePerspective: true,
-  scanlines: true,
-  fishbowlIntensity: 0.15,
-  soundEnabled: true,
-  flickerEnabled: true,
-};
-
-export const initialState: AppState = {
-  messages: [],
-  currentInstance: null,
-  isGenerating: false,
-  streamingText: '',
-  tokenUsage: { prompt: 0, response: 0, total: 0 },
-  settings: defaultSettings,
-  activePanel: 'instances',
-  lore: '',
-  profile: '',
-  shows: [],
-  instances: [],
-  editingShow: undefined,
-};
+function initAppState(initial: AppState): AppState {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.settings) {
+        return { ...initial, settings: { ...initial.settings, ...parsed.settings } };
+      }
+    }
+  } catch {}
+  return initial;
+}
 
 export type Action =
-  | { type: 'LOAD_STATE'; payload: Partial<AppState> }
-  | { type: 'SET_SHOWS'; payload: Show[] }
-  | { type: 'ADD_SHOW'; payload: Show }
-  | { type: 'UPDATE_SHOW'; payload: Show }
-  | { type: 'REMOVE_SHOW'; payload: string }
-  | { type: 'SET_INSTANCES'; payload: Instance[] }
-  | { type: 'ADD_INSTANCE'; payload: Instance }
-  | { type: 'UPDATE_INSTANCE'; payload: Instance }
-  | { type: 'REMOVE_INSTANCE'; payload: string }
+  | { type: 'SET_SHOWS'; payload: Show[] } | { type: 'ADD_SHOW'; payload: Show } | { type: 'UPDATE_SHOW'; payload: Show } | { type: 'REMOVE_SHOW'; payload: string }
+  | { type: 'SET_INSTANCES'; payload: Instance[] } | { type: 'ADD_INSTANCE'; payload: Instance } | { type: 'UPDATE_INSTANCE'; payload: Instance } | { type: 'REMOVE_INSTANCE'; payload: string }
   | { type: 'SET_CURRENT_INSTANCE'; payload: Instance | null }
-  | { type: 'ADD_MESSAGE'; payload: Message }
-  | { type: 'UPDATE_MESSAGE'; payload: { id: string; content: string } }
-  | { type: 'DELETE_MESSAGE'; payload: string }
-  | { type: 'SET_MESSAGES'; payload: Message[] }
-  | { type: 'CLEAR_SESSION' }
-  | { type: 'SET_GENERATING'; payload: boolean }
-  | { type: 'SET_STREAMING_TEXT'; payload: string }
+  | { type: 'ADD_MESSAGE'; payload: Message } | { type: 'UPDATE_MESSAGE'; payload: { id: string; content: string } } | { type: 'DELETE_MESSAGE'; payload: string } | { type: 'SET_MESSAGES'; payload: Message[] }
+  | { type: 'SET_GENERATING'; payload: boolean } | { type: 'SET_STREAMING_TEXT'; payload: string }
   | { type: 'UPDATE_TOKEN_USAGE'; payload: { prompt: number; response: number } }
   | { type: 'UPDATE_SETTINGS'; payload: Partial<Settings> }
   | { type: 'SET_EDITING_SHOW'; payload: Show | null | undefined };
 
 export function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case 'LOAD_STATE': return { ...state, ...action.payload };
     case 'SET_SHOWS': return { ...state, shows: action.payload };
     case 'ADD_SHOW': return { ...state, shows: [...state.shows, action.payload] };
     case 'UPDATE_SHOW': return { ...state, shows: state.shows.map(s => s.id === action.payload.id ? action.payload : s) };
@@ -408,52 +155,16 @@ export function appReducer(state: AppState, action: Action): AppState {
     case 'SET_EDITING_SHOW': return { ...state, editingShow: action.payload };
     case 'SET_INSTANCES': return { ...state, instances: action.payload };
     case 'ADD_INSTANCE': return { ...state, instances: [action.payload, ...state.instances] };
-    case 'UPDATE_INSTANCE':
-      return {
-        ...state,
-        instances: state.instances.map(i => i.id === action.payload.id ? action.payload : i),
-        currentInstance: state.currentInstance?.id === action.payload.id ? action.payload : state.currentInstance,
-        lore: state.currentInstance?.id === action.payload.id ? action.payload.lore : state.lore,
-        profile: state.currentInstance?.id === action.payload.id ? action.payload.profile : state.profile,
-      };
-    case 'REMOVE_INSTANCE':
-      return {
-        ...state,
-        instances: state.instances.filter(i => i.id !== action.payload),
-        currentInstance: state.currentInstance?.id === action.payload ? null : state.currentInstance
-      };
-    case 'SET_CURRENT_INSTANCE':
-      return {
-        ...state,
-        currentInstance: action.payload,
-        messages: action.payload ? action.payload.messages : [],
-        lore: action.payload ? action.payload.lore : '',
-        profile: action.payload ? action.payload.profile : ''
-      };
-    case 'ADD_MESSAGE': {
-      const newMessages = [...state.messages, action.payload];
-      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: newMessages });
-      return { ...state, messages: newMessages };
-    }
-    case 'UPDATE_MESSAGE': {
-      const newMessages = state.messages.map(m => m.id === action.payload.id ? { ...m, content: action.payload.content } : m);
-      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: newMessages });
-      return { ...state, messages: newMessages };
-    }
-    case 'DELETE_MESSAGE': {
-      const newMessages = state.messages.filter(m => m.id !== action.payload);
-      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: newMessages });
-      return { ...state, messages: newMessages };
-    }
-    case 'SET_MESSAGES': {
-      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: action.payload });
-      return { ...state, messages: action.payload };
-    }
-    case 'CLEAR_SESSION': return { ...state, currentInstance: null, messages: [] };
+    case 'UPDATE_INSTANCE': return { ...state, instances: state.instances.map(i => i.id === action.payload.id ? action.payload : i), currentInstance: state.currentInstance?.id === action.payload.id ? action.payload : state.currentInstance, lore: state.currentInstance?.id === action.payload.id ? action.payload.lore : state.lore, profile: state.currentInstance?.id === action.payload.id ? action.payload.profile : state.profile };
+    case 'REMOVE_INSTANCE': return { ...state, instances: state.instances.filter(i => i.id !== action.payload), currentInstance: state.currentInstance?.id === action.payload ? null : state.currentInstance };
+    case 'SET_CURRENT_INSTANCE': return { ...state, currentInstance: action.payload, messages: action.payload ? action.payload.messages : [], lore: action.payload ? action.payload.lore : '', profile: action.payload ? action.payload.profile : '' };
+    case 'ADD_MESSAGE': { const m = [...state.messages, action.payload]; if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); return { ...state, messages: m }; }
+    case 'UPDATE_MESSAGE': { const m = state.messages.map(x => x.id === action.payload.id ? { ...x, content: action.payload.content } : x); if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); return { ...state, messages: m }; }
+    case 'DELETE_MESSAGE': { const m = state.messages.filter(x => x.id !== action.payload); if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); return { ...state, messages: m }; }
+    case 'SET_MESSAGES': { if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: action.payload }); return { ...state, messages: action.payload }; }
     case 'SET_GENERATING': return { ...state, isGenerating: action.payload };
     case 'SET_STREAMING_TEXT': return { ...state, streamingText: action.payload };
-    case 'UPDATE_TOKEN_USAGE':
-      return { ...state, tokenUsage: { prompt: action.payload.prompt, response: action.payload.response, total: state.tokenUsage.total + action.payload.prompt + action.payload.response } };
+    case 'UPDATE_TOKEN_USAGE': return { ...state, tokenUsage: { prompt: action.payload.prompt, response: action.payload.response, total: state.tokenUsage.total + action.payload.prompt + action.payload.response } };
     case 'UPDATE_SETTINGS': return { ...state, settings: { ...state.settings, ...action.payload } };
     default: return state;
   }
@@ -462,774 +173,733 @@ export function appReducer(state: AppState, action: Action): AppState {
 export const AppContext = createContext<{ state: AppState; dispatch: React.Dispatch<Action> } | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(appReducer, initialState);
+  const [state, dispatch] = useReducer(appReducer, initialState, initAppState);
 
   useEffect(() => {
-    const init = async () => {
-      // 1. Health check & Settings
+    (async () => {
       await api.healthCheck();
-      const savedString = localStorage.getItem(STORAGE_KEY);
-      let savedSettings: Partial<Settings> = {};
-      if (savedString) {
-        try { savedSettings = JSON.parse(savedString).settings || {}; } catch (e) { console.error(e); }
-      }
-      dispatch({ type: 'UPDATE_SETTINGS', payload: { ...defaultSettings, ...savedSettings } });
+      const env = await api.getEnvSettings();
 
-      // 2. Load Data
+      const payload: Partial<Settings> = {};
+      if (env.model) payload.model = env.model;
+      if (env.systemPrompt) payload.systemPrompt = env.systemPrompt;
+      if (env.summarizationModel) payload.summarizationModel = env.summarizationModel;
+      if (env.apiKey !== undefined) payload.apiKey = env.apiKey;
+
+      if (Object.keys(payload).length > 0) {
+        dispatch({ type: 'UPDATE_SETTINGS', payload });
+      }
+
       try {
-        const [shows, instances] = await Promise.all([api.getShows(), api.getInstances()]);
-        dispatch({ type: 'SET_SHOWS', payload: shows });
-        dispatch({ type: 'SET_INSTANCES', payload: instances });
-      } catch (e) { console.error("Backend sync failed", e); }
-    };
-    init();
+        const [sh, inst] = await Promise.all([api.getShows(), api.getInstances()]);
+        dispatch({ type: 'SET_SHOWS', payload: sh });
+        dispatch({ type: 'SET_INSTANCES', payload: inst });
+      } catch {}
+    })();
   }, []);
 
   useEffect(() => {
-    if (state.settings !== defaultSettings) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings: state.settings }));
-    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings: state.settings }));
   }, [state.settings]);
 
   return <AppContext.Provider value={{ state, dispatch }}>{children}</AppContext.Provider>;
 }
 
-export function useApp() {
-  const context = useContext(AppContext);
-  if (!context) throw new Error('useApp must be used within AppProvider');
-  return context;
-}
+export function useApp() { const c = useContext(AppContext); if (!c) throw new Error('useApp must be used within AppProvider'); return c; }
 
-// ==========================================
-// 6. COMPONENTS
-// ==========================================
+// === ICONS ===
+function CloseIcon({ size = 12 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>; }
+function SettingsIcon({ size = 16 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>; }
 
-function RewindOverlay({ isActive, onComplete, colorTheme, mode = 'rewind' }: any) {
-  const { state } = useApp();
-  const { playRewindSound, playStaticNoise, playGlitchSound } = useSound(state.settings.soundEnabled);
-  const [phase, setPhase] = useState<'rewind' | 'static' | 'none'>('none');
-  const colors = themeColors[colorTheme as keyof typeof themeColors];
+// === SMALL COMPONENTS ===
+function CloseButton({ onClick, large }: { onClick: () => void; large?: boolean }) { return <button onClick={onClick} className={cn("close-btn", large && "close-btn-lg")} aria-label="Close"><CloseIcon size={large ? 14 : 12} /></button>; }
+function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) { return <button onClick={() => !disabled && onChange(!checked)} className={cn("toggle-switch", checked && "active", disabled && "opacity-30 cursor-not-allowed")} role="switch" aria-checked={checked} />; }
 
-  useEffect(() => {
-    if (isActive) {
-      if (mode === 'rewind') {
-        setPhase('rewind');
-        playRewindSound();
-        const staticTimeout = setTimeout(() => { setPhase('static'); playStaticNoise(0.5); }, 1200);
-        const completeTimeout = setTimeout(() => { setPhase('none'); onComplete(); }, 1700);
-        return () => { clearTimeout(staticTimeout); clearTimeout(completeTimeout); };
-      } else {
-        // Regenerate Mode
-        setPhase('static');
-        playGlitchSound();
-        const completeTimeout = setTimeout(() => { setPhase('none'); onComplete(); }, 400);
-        return () => { clearTimeout(completeTimeout); };
-      }
-    } else { setPhase('none'); }
-  }, [isActive, onComplete, playRewindSound, playStaticNoise, playGlitchSound, mode]);
-
-  if (phase === 'none') return null;
-
+function ParaDivider() {
   return (
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/90">
-      {phase === 'rewind' && (
-        <>
-          <div className="absolute inset-0 overflow-hidden">
-            {[...Array(8)].map((_, i) => (
-              <div key={`bar-${i}`} className={cn("absolute h-2 w-full opacity-60", colors.bgOpacity)}
-                style={{ top: `${12 + i * 12}%`, animation: `vhs-bar 0.15s linear infinite`, animationDelay: `${i * 0.02}s`, transform: `translateX(${Math.sin(i) * 20}px)` }} />
-            ))}
-            {[...Array(20)].map((_, i) => (
-              <div key={`line-${i}`} className={cn("absolute h-0.5 w-full bg-gradient-to-r from-transparent to-transparent animate-vhs-line", colors.via)}
-                style={{ top: `${(i * 5) + Math.random() * 10}%`, animationDelay: `${i * 0.05}s`, animationDuration: '0.3s' }} />
-            ))}
-          </div>
-          <div className="relative z-10 flex flex-col items-center gap-6">
-            <div className={cn("flex items-center gap-4 animate-pulse text-6xl font-bold", colors.primary)}><span>{"<<"}</span><span>{"<<"}</span></div>
-            <div className={cn("font-mono text-3xl tracking-[0.3em] animate-blink", colors.primary)}>{mode === 'rewind' ? '<< REW <<' : '!! GLITCH !!'}</div>
-            <div className="font-mono text-sm text-gray-500 tracking-widest">--:--:--</div>
-          </div>
-          <div className="absolute inset-0 animate-screen-shake opacity-30 pointer-events-none" style={{ background: `repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(128, 90, 213, 0.05) 2px, rgba(128, 90, 213, 0.05) 4px)` }} />
-          <div className="absolute inset-0 pointer-events-none"><div className="absolute inset-0 bg-red-500/5 animate-glitch-r" /><div className="absolute inset-0 bg-blue-500/5 animate-glitch-b" /></div>
-        </>
-      )}
-      {phase === 'static' && (
-        <div className="absolute inset-0 animate-static-noise">
-          <div className="w-full h-full opacity-80" style={{ background: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")` }} />
-          <div className={cn("absolute inset-0 opacity-20", colors.bg)} />
-        </div>
-      )}
+    <div className="para-divider my-2">
+      <div className="para-divider-shard" />
+      <div className="para-divider-center" />
+      <div className="para-divider-shard" />
     </div>
   );
 }
 
+function ParaProgress({ current, total }: { current: number; total: number }) {
+  return (
+    <div className="para-progress">
+      {Array.from({ length: total }, (_, i) => (
+        <div key={i} className={cn("para-progress-seg", i < current && "para-progress-seg-fill")} />
+      ))}
+    </div>
+  );
+}
+
+// === OVERLAYS ===
+function CRTOverlay() {
+  const { state } = useApp();
+  const { crtEffects, scanlines, fishbowlIntensity, flickerEnabled } = state.settings;
+  if (!crtEffects) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-50 overflow-hidden">
+      {scanlines && <div className="absolute inset-0 z-50" style={{ background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)', backgroundSize: '100% 4px' }} />}
+      {flickerEnabled && <div className="absolute inset-0 z-50 animate-flicker-overlay" style={{ background: 'rgba(255,255,255,0.02)' }} />}
+      {fishbowlIntensity > 0 && <div className="absolute inset-0 z-40" style={{ boxShadow: `inset 0 0 ${100 * fishbowlIntensity}px rgba(0,0,0,0.9)` }} />}
+    </div>
+  );
+}
+
+// === EDIT SHOW MODAL ===
 export function EditShowModal({ isOpen, onClose, show }: { isOpen: boolean; onClose: () => void; show?: Show | null }) {
   const { dispatch } = useApp();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [lore, setLore] = useState('');
-  const [profile, setProfile] = useState('');
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const [activeTab, setActiveTab] = useState<'general' | 'lore' | 'profile' | 'episodes' | 'import'>('general');
-  const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [importText, setImportText] = useState('');
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [name, setName] = useState(''); const [description, setDescription] = useState(''); const [lore, setLore] = useState(''); const [profile, setProfile] = useState('');
+  const [episodes, setEpisodes] = useState<Episode[]>([]); const [activeTab, setActiveTab] = useState<string>('general');
+  const [selEpId, setSelEpId] = useState<string | null>(null); const [isSaving, setIsSaving] = useState(false); const [err, setErr] = useState<string | null>(null);
+  const [importText, setImportText] = useState(''); const [draggedId, setDraggedId] = useState<string | null>(null); const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
-      if (show) {
-        setName(show.name); setDescription(show.description); setLore(show.lore); setProfile(show.profile); setEpisodes(show.episodes);
-        if(show.episodes.length > 0) setSelectedEpisodeId(show.episodes[0].id);
-      } else {
-        setName('New Campaign'); setDescription('A new adventure begins...'); setLore('The world is vast...'); setProfile('You are a traveler...');
-        const newEp = { id: Date.now().toString(), name: 'Chapter 1', context: 'You start here.' };
-        setEpisodes([newEp]); setSelectedEpisodeId(newEp.id);
-      }
-      setActiveTab('general'); setIsSaving(false); setErrorMsg(null); setImportText('');
+      if (show) { setName(show.name); setDescription(show.description); setLore(show.lore); setProfile(show.profile); setEpisodes(show.episodes); if (show.episodes.length > 0) setSelEpId(show.episodes[0].id); }
+      else { setName('New Campaign'); setDescription('A new adventure...'); setLore('The world is vast...'); setProfile('You are a traveler...'); const e = { id: Date.now().toString(), name: 'Chapter 1', context: 'You start here.' }; setEpisodes([e]); setSelEpId(e.id); }
+      setActiveTab('general'); setIsSaving(false); setErr(null); setImportText('');
     }
   }, [isOpen, show]);
 
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    setErrorMsg(null);
-    if (!name.trim()) { setErrorMsg("CAMPAIGN TITLE REQUIRED"); setActiveTab('general'); return; }
+    setErr(null); if (!name.trim()) { setErr("TITLE REQUIRED"); setActiveTab('general'); return; }
     setIsSaving(true);
-    try {
-      const showData = { name, description, lore, profile, episodes };
-      if (show) { const updated = await api.updateShow(show.id, showData); dispatch({ type: 'UPDATE_SHOW', payload: updated }); }
-      else { const created = await api.createShow(showData); dispatch({ type: 'ADD_SHOW', payload: created }); }
-      onClose();
-    } catch (e: any) { console.error("Save failed:", e); setErrorMsg(e.message || "CONNECTION FAILED"); } finally { setIsSaving(false); }
+    try { const d = { name, description, lore, profile, episodes }; if (show) { dispatch({ type: 'UPDATE_SHOW', payload: await api.updateShow(show.id, d) }); } else { dispatch({ type: 'ADD_SHOW', payload: await api.createShow(d) }); } onClose(); }
+    catch (e: any) { setErr(e.message || "FAILED"); } finally { setIsSaving(false); }
   };
 
-  const handleProcessImport = () => {
+  const handleImport = () => {
     if (!importText.trim()) return;
-    const lines = importText.split('\n');
-    let newName = name;
-    let newEpisodes: Episode[] = [];
-    let currentEp: Partial<Episode> | null = null;
-    let buffer: string[] = [];
-
-    // FIX: Using for...of instead of forEach so TypeScript can track assignments to currentEp
-    for (const line of lines) {
-      if (line.startsWith('# ')) {
-        newName = line.replace('# ', '').trim();
-      } else if (line.startsWith('## ')) {
-        if (currentEp) {
-          currentEp.context = buffer.join('\n').trim();
-          newEpisodes.push(currentEp as Episode);
-        }
-        buffer = [];
-        currentEp = { id: Date.now().toString() + Math.random().toString().slice(2,6), name: line.replace('## ', '').trim(), context: '' };
-      } else {
-        if (currentEp) buffer.push(line);
-      }
-    }
-
-    if (currentEp) {
-      currentEp.context = buffer.join('\n').trim();
-      newEpisodes.push(currentEp as Episode);
-    }
-
-    if (newEpisodes.length > 0) {
-      if (confirm(`Parsed ${newEpisodes.length} episodes. Replace existing chapters?`)) {
-        setName(newName); setEpisodes(newEpisodes); setSelectedEpisodeId(newEpisodes[0].id); setActiveTab('episodes'); setImportText('');
-      }
-    } else { alert("No episodes found. Make sure to use '## Episode Name' to start chapters."); }
+    const lines = importText.split('\n'); let nn = name; let ne: Episode[] = []; let cur: Partial<Episode> | null = null; let buf: string[] = [];
+    for (const l of lines) { if (l.startsWith('# ')) nn = l.replace('# ', '').trim(); else if (l.startsWith('## ')) { if (cur) { cur.context = buf.join('\n').trim(); ne.push(cur as Episode); } buf = []; cur = { id: Date.now().toString() + Math.random().toString().slice(2, 6), name: l.replace('## ', '').trim(), context: '' }; } else if (cur) buf.push(l); }
+    if (cur) { cur.context = buf.join('\n').trim(); ne.push(cur as Episode); }
+    if (ne.length > 0 && confirm(`Parsed ${ne.length} episodes. Replace?`)) { setName(nn); setEpisodes(ne); setSelEpId(ne[0].id); setActiveTab('episodes'); setImportText(''); }
   };
 
-  const handleDragStart = (e: React.DragEvent, id: string) => { setDraggedId(id); e.dataTransfer.effectAllowed = 'move'; setTimeout(() => { (e.target as HTMLElement).style.opacity = '0.5'; }, 0); };
-  const handleDragEnd = (e: React.DragEvent) => { (e.target as HTMLElement).style.opacity = '1'; setDraggedId(null); setDragOverId(null); };
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    if (!draggedId || draggedId === targetId) { setDraggedId(null); setDragOverId(null); return; }
-    const dragIndex = episodes.findIndex(ep => ep.id === draggedId);
-    const dropIndex = episodes.findIndex(ep => ep.id === targetId);
-    if (dragIndex === -1 || dropIndex === -1) return;
-    const newEpisodes = [...episodes];
-    const [draggedItem] = newEpisodes.splice(dragIndex, 1);
-    newEpisodes.splice(dropIndex, 0, draggedItem);
-    setEpisodes(newEpisodes); setDraggedId(null); setDragOverId(null);
-  };
-  const moveEpisode = (id: string, dir: 'up' | 'down') => {
-    const idx = episodes.findIndex(ep => ep.id === id);
-    if (idx === -1) return;
-    const newIdx = dir === 'up' ? idx - 1 : idx + 1;
-    if (newIdx < 0 || newIdx >= episodes.length) return;
-    const newEpisodes = [...episodes];
-    [newEpisodes[idx], newEpisodes[newIdx]] = [newEpisodes[newIdx], newEpisodes[idx]];
-    setEpisodes(newEpisodes);
-  };
-  const updateEpisode = (id: string, field: keyof Episode, val: string) => setEpisodes(episodes.map(ep => ep.id === id ? { ...ep, [field]: val } : ep));
-  const activeEpisode = episodes.find(e => e.id === selectedEpisodeId);
+  const moveEp = (id: string, dir: 'up' | 'down') => { const i = episodes.findIndex(e => e.id === id); const ni = dir === 'up' ? i - 1 : i + 1; if (ni < 0 || ni >= episodes.length) return; const n = [...episodes]; [n[i], n[ni]] = [n[ni], n[i]]; setEpisodes(n); };
+  const updateEp = (id: string, f: keyof Episode, v: string) => setEpisodes(episodes.map(e => e.id === id ? { ...e, [f]: v } : e));
+  const activeEp = episodes.find(e => e.id === selEpId);
+  const handleDrop = (e: React.DragEvent, tid: string) => { e.preventDefault(); if (!draggedId || draggedId === tid) { setDraggedId(null); setDragOverId(null); return; } const di = episodes.findIndex(ep => ep.id === draggedId); const ti = episodes.findIndex(ep => ep.id === tid); if (di === -1 || ti === -1) return; const n = [...episodes]; const [d] = n.splice(di, 1); n.splice(ti, 0, d); setEpisodes(n); setDraggedId(null); setDragOverId(null); };
+
+  const tabs = [{ key: 'general', label: 'GENERAL' }, { key: 'lore', label: 'LORE' }, { key: 'profile', label: 'PROFILE' }];
 
   return (
-    <div className="absolute inset-0 z-[100] flex flex-col bg-black animate-fade-in">
-      <div className="h-12 border-b border-[var(--border-color)] bg-[var(--bg-tint)] flex items-center justify-between px-4 select-none shrink-0">
-        <div className="flex items-center gap-3"><div className="w-3 h-3 rounded-full bg-[var(--glow-color)] animate-pulse shadow-[0_0_10px_var(--glow-color)]" /><span className="font-bold tracking-widest text-[var(--glow-color)] text-theme-glow uppercase text-lg">{show ? `BLUEPRINT: ${show.name}` : 'NEW_BLUEPRINT // SYSTEM'}</span></div>
-        <button onClick={onClose} className="px-4 py-1 hover:bg-white/10 text-gray-500 hover:text-white transition-colors border border-transparent hover:border-gray-600">[CLOSE EDITOR]</button>
+    <div className="absolute inset-0 z-[100] flex flex-col animate-fade-in-scale" style={{ background: 'var(--surface-1)' }}>
+      <div className="bezel-toolbar h-12 flex items-center justify-between px-4 select-none shrink-0 para-header">
+        <div className="flex items-center gap-3 relative z-10">
+          <div className="bezel-led animate-led-pulse" />
+          <span className="text-sm font-semibold tracking-wider text-emboss uppercase" style={{ color: 'var(--text-primary)' }}>{show ? `EDIT: ${show.name}` : 'NEW BLUEPRINT'}</span>
+          <div className="para-badge-glow para-badge"><span>EDITOR</span></div>
+        </div>
+        <CloseButton onClick={onClose} large />
       </div>
+
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-64 border-r border-[var(--border-color)] bg-black/80 flex flex-col shrink-0">
-          <div className="p-0 flex flex-col h-full">
-            <div className="p-3 text-xs font-bold text-gray-600 border-b border-gray-900">CONFIGURATION</div>
-            {['general', 'lore', 'profile'].map((tab) => (
-              <button key={tab} onClick={() => setActiveTab(tab as any)} className={cn("w-full text-left px-4 py-3 text-xs font-mono border-l-4 transition-all uppercase tracking-wider", activeTab === tab ? "border-[var(--glow-color)] bg-[var(--bg-tint)] text-white font-bold" : "border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5")}>{tab}</button>
-            ))}
-            <div className="p-3 text-xs font-bold text-gray-600 border-b border-gray-900 border-t mt-4 flex justify-between items-center bg-gray-900/30">
-              <span>CHAPTERS ({episodes.length})</span>
-              <div className="flex gap-1">
-                <button onClick={() => setActiveTab('import')} className={cn("text-[10px] border border-gray-700 px-1.5 py-0.5 transition-colors", activeTab === 'import' ? "bg-white text-black" : "text-gray-400 hover:text-white hover:bg-white/10")}>IMPORT</button>
-                <button onClick={() => { const newEp = { id: Date.now().toString(), name: 'New Chapter', context: '' }; setEpisodes([...episodes, newEp]); setSelectedEpisodeId(newEp.id); setActiveTab('episodes'); }} className="hover:text-white text-[10px] border border-gray-700 px-1.5 py-0.5 hover:bg-white/10 transition-colors">ADD +</button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {episodes.map((ep, index) => (
-                <div key={ep.id} draggable onDragStart={(e) => handleDragStart(e, ep.id)} onDragEnd={handleDragEnd} onDragOver={(e) => { e.preventDefault(); if (ep.id !== draggedId && dragOverId !== ep.id) setDragOverId(ep.id); }} onDrop={(e) => handleDrop(e, ep.id)} onClick={() => { setActiveTab('episodes'); setSelectedEpisodeId(ep.id); }}
-                  className={cn("w-full text-left px-4 py-3 text-xs font-mono border-l-4 cursor-grab group flex justify-between items-center transition-all border-b border-gray-900/50 select-none", (activeTab === 'episodes' && selectedEpisodeId === ep.id) ? "border-[var(--glow-color)] bg-[var(--bg-tint)] text-[var(--glow-color)]" : "border-transparent text-gray-500 hover:bg-white/5", draggedId === ep.id && "opacity-50 cursor-grabbing", dragOverId === ep.id && draggedId !== ep.id && "bg-[var(--glow-color)]/20 border-[var(--glow-color)]/50")}>
-                  <div className="flex items-center gap-2 flex-1 min-w-0"><span className="text-gray-600 text-[10px] shrink-0">{index + 1}.</span><span className="truncate">{ep.name}</span></div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 shrink-0">
-                    <button onClick={(e) => { e.stopPropagation(); moveEpisode(ep.id, 'up'); }} disabled={index === 0} className="px-1 hover:text-white transition-colors disabled:opacity-30">↑</button>
-                    <button onClick={(e) => { e.stopPropagation(); moveEpisode(ep.id, 'down'); }} disabled={index === episodes.length - 1} className="px-1 hover:text-white transition-colors disabled:opacity-30">↓</button>
-                    <button onClick={(e) => { e.stopPropagation(); setEpisodes(episodes.filter(x => x.id !== ep.id)); }} className="hover:text-red-500 font-bold px-1">×</button>
-                  </div>
-                </div>
+        <div className="w-56 flex flex-col shrink-0 bezel-raised" style={{ borderRight: '2px solid rgba(0,0,0,0.5)' }}>
+          <div className="p-3 space-y-1">
+            <div className="text-[9px] font-bold tracking-[0.2em] text-engrave px-2 py-2" style={{ color: 'var(--text-dim)' }}>CONFIG</div>
+            <div className="flex flex-col gap-1">
+              {tabs.map(t => (
+                <button key={t.key} onClick={() => setActiveTab(t.key)}
+                  className={cn("para-tab w-full", activeTab === t.key && "para-tab-active")}>
+                  <span>{t.label}</span>
+                </button>
               ))}
             </div>
           </div>
-        </div>
-        <div className="flex-1 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNSkiLz48L3N2Zz4=')] p-8 overflow-y-auto custom-scrollbar relative">
-          <div className="pointer-events-none absolute inset-0 opacity-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))]" style={{backgroundSize: "100% 2px, 3px 100%"}} />
-          {activeTab === 'general' && (
-            <div className="max-w-3xl space-y-6 animate-fade-in relative z-10">
-              <div className="space-y-2"><label className="text-xs text-[var(--glow-color)] font-bold tracking-widest block">CAMPAIGN TITLE</label><input value={name} onChange={e => setName(e.target.value)} className="w-full bg-black/50 border border-gray-700 focus:border-[var(--glow-color)] p-4 text-2xl font-mono text-white focus:outline-none transition-all shadow-lg" placeholder="Enter title..." /></div>
-              <div className="space-y-2"><label className="text-xs text-gray-500 font-bold tracking-widest block">BRIEF DESCRIPTION</label><textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full h-40 bg-black/50 border border-gray-700 focus:border-[var(--glow-color)] p-4 text-sm font-mono text-gray-300 focus:outline-none transition-all resize-none shadow-lg" placeholder="What is this story about?" /></div>
-            </div>
-          )}
-          {(activeTab === 'lore' || activeTab === 'profile') && (
-            <div className="h-full flex flex-col animate-fade-in relative z-10">
-              <div className="flex justify-between items-end mb-2"><label className="text-xs text-[var(--glow-color)] font-bold tracking-widest uppercase">{activeTab} DATA</label><span className="text-[10px] text-gray-600">MARKDOWN SUPPORTED</span></div>
-              <textarea value={activeTab === 'lore' ? lore : profile} onChange={e => activeTab === 'lore' ? setLore(e.target.value) : setProfile(e.target.value)} className="flex-1 bg-black/80 border border-gray-700 focus:border-[var(--glow-color)] p-6 text-sm font-mono text-gray-300 focus:outline-none transition-all resize-none leading-relaxed shadow-inner" spellCheck={false} />
-            </div>
-          )}
-          {activeTab === 'import' && (
-             <div className="h-full flex flex-col animate-fade-in relative z-10">
-                <div className="mb-4 space-y-2"><h3 className="text-[var(--glow-color)] font-bold tracking-widest">BULK SCRIPT IMPORT</h3></div>
-                <textarea value={importText} onChange={e => setImportText(e.target.value)} className="flex-1 bg-black/80 border border-gray-700 focus:border-[var(--glow-color)] p-6 text-xs font-mono text-green-400 focus:outline-none resize-none leading-relaxed shadow-inner font-bold" placeholder="# My Epic Saga&#10;&#10;## Chapter 1: The Beginning&#10;You are standing in a tavern..." />
-                <button onClick={handleProcessImport} className="mt-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold tracking-widest text-xs">PROCESS & OVERWRITE CHAPTERS</button>
-             </div>
-          )}
-          {activeTab === 'episodes' && activeEpisode && (
-            <div className="h-full flex flex-col animate-fade-in space-y-4 relative z-10">
-              <div className="flex items-center gap-4 shrink-0 p-4 border border-gray-800 bg-black/40">
-                 <div className="flex-1"><label className="text-[10px] text-gray-500 font-bold tracking-widest mb-1 block">CHAPTER TITLE</label><input value={activeEpisode.name} onChange={e => updateEpisode(activeEpisode.id, 'name', e.target.value)} className="w-full bg-transparent border-b border-gray-700 focus:border-[var(--glow-color)] py-2 text-xl font-mono text-white focus:outline-none" /></div>
-                 <div className="text-right"><div className="text-[10px] text-gray-600">POSITION: {episodes.findIndex(e => e.id === activeEpisode.id) + 1} / {episodes.length}</div><div className="text-[10px] text-[var(--glow-color)] animate-pulse">● EDITING</div></div>
+
+          <ParaDivider />
+
+          <div className="px-3 pb-2">
+            <div className="flex justify-between items-center mb-2 px-1">
+              <span className="text-[9px] font-bold tracking-[0.2em] text-engrave" style={{ color: 'var(--text-dim)' }}>CHAPTERS ({episodes.length})</span>
+              <div className="flex gap-1">
+                <button onClick={() => setActiveTab('import')} className={cn("para-btn para-btn-sm", activeTab === 'import' && "para-tab-active")}><span>IMP</span></button>
+                <button onClick={() => { const e = { id: Date.now().toString(), name: 'New Chapter', context: '' }; setEpisodes([...episodes, e]); setSelEpId(e.id); setActiveTab('episodes'); }} className="para-btn para-btn-sm"><span>+</span></button>
               </div>
-              <div className="flex-1 flex flex-col"><label className="text-[10px] text-gray-500 font-bold tracking-widest mb-2 block">CONTEXT / PROMPT</label><textarea value={activeEpisode.context} onChange={e => updateEpisode(activeEpisode.id, 'context', e.target.value)} className="flex-1 bg-black/80 border border-gray-700 focus:border-[var(--glow-color)] p-6 text-sm font-mono text-gray-300 focus:outline-none resize-none leading-relaxed shadow-inner" placeholder="Describe the scene..." /></div>
             </div>
-          )}
-          {activeTab === 'episodes' && !activeEpisode && (
-             <div className="h-full flex items-center justify-center opacity-30"><div className="text-center"><div className="text-6xl mb-4 text-[var(--glow-color)]">←</div><div className="tracking-widest">SELECT A CHAPTER TO BEGIN</div></div></div>
-          )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-3 pb-3 space-y-1">
+            {episodes.map((ep, i) => (
+              <div key={ep.id} draggable
+                onDragStart={() => setDraggedId(ep.id)}
+                onDragEnd={() => { setDraggedId(null); setDragOverId(null); }}
+                onDragOver={e => { e.preventDefault(); if (ep.id !== draggedId) setDragOverId(ep.id); }}
+                onDrop={e => handleDrop(e, ep.id)}
+                onClick={() => { setActiveTab('episodes'); setSelEpId(ep.id); }}
+                className={cn(
+                  "w-full text-left px-2 py-2 text-[10px] cursor-grab group flex justify-between items-center transition-all select-none relative",
+                  (activeTab === 'episodes' && selEpId === ep.id) ? "btn btn-pressed !border-[var(--border-color)]" : "btn btn-ghost",
+                  draggedId === ep.id && "opacity-40", dragOverId === ep.id && draggedId !== ep.id && "!border-[var(--accent)]"
+                )}>
+                {(activeTab === 'episodes' && selEpId === ep.id) && <div className="para-accent absolute left-0 top-1 bottom-1" />}
+                <div className="flex items-center gap-2 flex-1 min-w-0 ml-2">
+                  <span className="font-mono opacity-40" style={{ color: 'var(--text-dim)', fontSize: '9px' }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span className="truncate font-medium">{ep.name}</span>
+                </div>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                  <button onClick={e => { e.stopPropagation(); moveEp(ep.id, 'up'); }} disabled={i === 0} className="btn btn-ghost btn-sm !p-0.5 disabled:opacity-20">↑</button>
+                  <button onClick={e => { e.stopPropagation(); moveEp(ep.id, 'down'); }} disabled={i === episodes.length - 1} className="btn btn-ghost btn-sm !p-0.5 disabled:opacity-20">↓</button>
+                  <button onClick={e => { e.stopPropagation(); setEpisodes(episodes.filter(x => x.id !== ep.id)); }} className="btn btn-ghost btn-sm !p-0.5 hover:!text-red-400">×</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar" style={{ background: 'var(--surface-1)' }}>
+          <div className="bezel-well p-6 h-full">
+            {activeTab === 'general' && (
+              <div className="max-w-2xl space-y-6 animate-fade-in">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="para-accent-wide" style={{ height: '20px' }} />
+                  <span className="text-xs font-bold tracking-[0.15em] text-emboss uppercase" style={{ color: 'var(--accent)' }}>General Settings</span>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>Campaign Title</label>
+                  <input value={name} onChange={e => setName(e.target.value)} className="input-field w-full text-lg font-semibold" placeholder="Enter title..." />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>Description</label>
+                  <textarea value={description} onChange={e => setDescription(e.target.value)} className="textarea-field font-story w-full h-40" placeholder="What is this story about?" />
+                </div>
+              </div>
+            )}
+            {(activeTab === 'lore' || activeTab === 'profile') && (
+              <div className="h-full flex flex-col animate-fade-in">
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="para-accent-wide" style={{ height: '20px' }} />
+                    <span className="text-xs font-bold tracking-[0.15em] text-emboss uppercase" style={{ color: 'var(--accent)' }}>{activeTab} Data</span>
+                  </div>
+                  <div className="para-badge"><span>MARKDOWN</span></div>
+                </div>
+                <textarea value={activeTab === 'lore' ? lore : profile} onChange={e => activeTab === 'lore' ? setLore(e.target.value) : setProfile(e.target.value)} className="textarea-field font-story flex-1" spellCheck={false} />
+              </div>
+            )}
+            {activeTab === 'import' && (
+              <div className="h-full flex flex-col animate-fade-in">
+                <div className="flex items-center gap-3 mb-3"><div className="para-accent-wide" style={{ height: '20px' }} /><span className="text-xs font-bold tracking-[0.15em] text-emboss uppercase" style={{ color: 'var(--accent)' }}>Bulk Import</span></div>
+                <textarea value={importText} onChange={e => setImportText(e.target.value)} className="textarea-field font-story flex-1" style={{ color: '#22c55e' }} placeholder="# My Saga&#10;&#10;## Chapter 1&#10;You begin..." />
+                <button onClick={handleImport} className="para-btn para-btn-primary mt-4 w-full py-3"><span>PROCESS & OVERWRITE CHAPTERS</span></button>
+              </div>
+            )}
+            {activeTab === 'episodes' && activeEp && (
+              <div className="h-full flex flex-col animate-fade-in space-y-4">
+                <div className="bezel-raised p-4 flex items-center justify-between para-corner-tl para-corner-br relative">
+                  <div className="flex-1">
+                    <label className="text-[9px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>Chapter Title</label>
+                    <input value={activeEp.name} onChange={e => updateEp(activeEp.id, 'name', e.target.value)} className="input-field w-full text-lg font-semibold mt-1" />
+                  </div>
+                  <div className="text-right ml-4 space-y-1">
+                    <div className="font-mono text-[10px]" style={{ color: 'var(--text-dim)' }}>POS: {episodes.findIndex(e => e.id === activeEp.id) + 1}/{episodes.length}</div>
+                    <ParaProgress current={episodes.findIndex(e => e.id === activeEp.id) + 1} total={episodes.length} />
+                    <div className="flex items-center gap-1.5 mt-1 justify-end"><div className="bezel-led animate-led-pulse" /><span className="text-[9px] font-bold" style={{ color: 'var(--accent)' }}>EDITING</span></div>
+                  </div>
+                </div>
+                <div className="flex-1 flex flex-col">
+                  <label className="text-[9px] font-bold tracking-widest uppercase mb-2" style={{ color: 'var(--text-dim)' }}>Context / Prompt</label>
+                  <textarea value={activeEp.context} onChange={e => updateEp(activeEp.id, 'context', e.target.value)} className="textarea-field font-story flex-1" placeholder="Describe the scene..." />
+                </div>
+              </div>
+            )}
+            {activeTab === 'episodes' && !activeEp && (
+              <div className="h-full flex items-center justify-center opacity-20"><div className="text-center"><div className="text-4xl mb-4" style={{ color: 'var(--accent)' }}>←</div><div className="tracking-widest text-sm text-emboss">SELECT A CHAPTER</div></div></div>
+            )}
+          </div>
         </div>
       </div>
-      <div className="h-16 border-t border-[var(--border-color)] bg-[var(--bg-tint)] flex items-center justify-end px-6 gap-4 shrink-0">
-        <div className="mr-auto text-xs font-mono">{errorMsg ? <span className="text-red-500 font-bold animate-pulse">ERROR: {errorMsg.toUpperCase()}</span> : <span className="text-gray-500">// SYSTEM_STATUS: {episodes.length} CHAPTERS_READY</span>}</div>
-        <button onClick={onClose} disabled={isSaving} className="px-6 py-2 border border-transparent text-gray-500 hover:text-white hover:border-gray-700 text-xs tracking-wider transition-all">DISCARD CHANGES</button>
-        <button onClick={handleSave} disabled={isSaving} className={cn("px-8 py-2 bg-[var(--border-color)] text-white text-xs font-bold tracking-wider shadow-[0_0_15px_rgba(0,0,0,0.5)] transition-all", isSaving ? "opacity-50 cursor-wait" : "hover:bg-[var(--glow-color)] hover:shadow-[0_0_20px_var(--glow-color)] hover:scale-105 active:scale-95", errorMsg && "border border-red-500")}>{isSaving ? "SAVING..." : (errorMsg ? "RETRY SAVE" : "SAVE BLUEPRINT")}</button>
+
+      <div className="bezel-statusbar h-14 flex items-center justify-end px-5 gap-3 shrink-0">
+        <div className="mr-auto text-[11px] font-mono">{err ? <span className="text-red-400 font-bold animate-blink">⚠ {err}</span> : <span style={{ color: 'var(--text-dim)' }}>{episodes.length} chapters ready</span>}</div>
+        <button onClick={onClose} disabled={isSaving} className="para-btn"><span>DISCARD</span></button>
+        <button onClick={handleSave} disabled={isSaving} className={cn("para-btn para-btn-primary", isSaving && "opacity-50")}><span>{isSaving ? "SAVING..." : err ? "RETRY" : "SAVE"}</span></button>
       </div>
     </div>
   );
 }
 
+// === FINISH EPISODE MODAL ===
 export function FinishEpisodeModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { state, dispatch } = useApp();
   const [loading, setLoading] = useState(false);
-
   if (!isOpen || !state.currentInstance) return null;
-
-  // Guard against crash if campaign is already finished (index out of bounds)
-  const currentEp = state.currentInstance.episodes[state.currentInstance.currentEpisodeIndex];
-  if (!currentEp) return null;
-
+  const ep = state.currentInstance.episodes[state.currentInstance.currentEpisodeIndex];
+  if (!ep) return null;
   const isLast = state.currentInstance.currentEpisodeIndex >= state.currentInstance.episodes.length - 1;
-
   const handleAdvance = async () => {
-    if (!state.currentInstance || !currentEp) return;
-    setLoading(true);
-    try {
-        const res = await api.advanceInstance(state.currentInstance.id, state.messages, state.settings.model);
-        if (res.success) {
-            const updated = { ...state.currentInstance };
-            updated.currentEpisodeIndex += 1;
-            updated.messages = [];
-            // Fix: Use spread instead of push to avoid mutating shared state
-            updated.summaryHistory = [
-              ...updated.summaryHistory,
-              { episodeName: currentEp.name, summary: res.summary, timestamp: new Date().toISOString() }
-            ];
-            dispatch({ type: 'UPDATE_INSTANCE', payload: updated });
-            onClose();
-        }
-    } catch(e) { console.error(e); } finally { setLoading(false); }
+    if (!state.currentInstance || !ep) return; setLoading(true);
+    try { const r = await api.advanceInstance(state.currentInstance.id, state.messages, state.settings.model); if (r.success) { dispatch({ type: 'UPDATE_INSTANCE', payload: { ...state.currentInstance, currentEpisodeIndex: state.currentInstance.currentEpisodeIndex + 1, messages: [] as Message[], summaryHistory: [...state.currentInstance.summaryHistory, { episodeName: ep.name, summary: r.summary, timestamp: new Date().toISOString() }] } }); onClose(); } } catch {} finally { setLoading(false); }
   };
-
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/80" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-gray-950 border-2 border-red-900/50 p-6 space-y-6">
-        <div className="text-center space-y-2"><div className="text-2xl font-bold tracking-widest text-red-500">EPISODE COMPLETE</div><div className="text-gray-400">"{currentEp.name}"</div></div>
-        <div className="text-sm text-gray-500 text-center">{loading ? "Analyzing session..." : isLast ? "Advancing will mark campaign complete." : "Proceed to next chapter? Chat history will be summarized."}</div>
+      <div className="absolute inset-0 modal-backdrop" onClick={onClose} />
+      <div className="relative w-full max-w-md bezel-frame p-6 space-y-5 animate-fade-in-scale para-corner-tl para-corner-br">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3"><div className="para-badge-danger para-badge"><span>EPISODE COMPLETE</span></div></div>
+          <CloseButton onClick={onClose} />
+        </div>
+        <ParaDivider />
+        <div className="text-center py-2">
+          <div className="text-xl font-bold text-emboss mb-2" style={{ color: 'var(--text-primary)' }}>"{ep.name}"</div>
+          <ParaProgress current={state.currentInstance.currentEpisodeIndex + 1} total={state.currentInstance.episodes.length} />
+          <div className="text-sm mt-3" style={{ color: 'var(--text-muted)' }}>{loading ? "Analyzing..." : isLast ? "This completes the campaign." : "Proceed to next chapter?"}</div>
+        </div>
         <div className="flex gap-2">
-            <button onClick={handleAdvance} disabled={loading} className={cn("flex-1 py-3 font-bold text-sm tracking-wider bg-red-900/20 border border-red-600 text-red-500 hover:bg-red-600 hover:text-black transition-all", loading && "opacity-50")}>{loading ? 'PROCESSING...' : (isLast ? 'FINISH CAMPAIGN' : 'NEXT EPISODE ▶')}</button>
-            <button onClick={onClose} disabled={loading} className="px-4 border border-gray-700 text-gray-500 hover:text-white">CANCEL</button>
+          <button onClick={handleAdvance} disabled={loading} className={cn("para-btn para-btn-danger flex-1 py-3", loading && "opacity-50")}><span>{loading ? 'PROCESSING...' : isLast ? 'FINISH ■' : 'NEXT ▶'}</span></button>
+          <button onClick={onClose} disabled={loading} className="para-btn py-3"><span>CANCEL</span></button>
         </div>
       </div>
     </div>
   );
 }
 
-function CRTOverlay() {
-  const { state } = useApp();
-  const { crtEffects, scanlines, fishbowlIntensity, flickerEnabled } = state.settings;
-  if (!crtEffects) return null;
-  return (
-    <div className="pointer-events-none absolute inset-0 z-50 rounded-[inherit] overflow-hidden">
-      {scanlines && <div className="absolute inset-0 z-50" style={{ background: `repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, 0.3) 2px, rgba(0, 0, 0, 0.3) 4px)`, backgroundSize: '100% 4px' }} />}
-      <div className="absolute inset-0 z-50" style={{ background: `radial-gradient(circle at center, transparent 50%, rgba(0, 0, 0, 0.4) 100%)` }} />
-      {flickerEnabled && <div className="absolute inset-0 z-50 animate-flicker-overlay" style={{ background: 'rgba(255, 255, 255, 0.02)' }} />}
-      {fishbowlIntensity > 0 && <div className="absolute inset-0 z-40" style={{ boxShadow: `inset 0 0 ${100 * fishbowlIntensity}px rgba(0, 0, 0, 0.9)` }} />}
-      <div className="absolute inset-0 z-50 opacity-10" style={{ background: `linear-gradient(90deg, rgba(255, 0, 0, 0.2) 0%, transparent 2%, transparent 98%, rgba(0, 0, 255, 0.2) 100%)` }} />
-    </div>
-  );
-}
-
+// === SETTINGS MODAL ===
 export function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { state, dispatch } = useApp();
-  const [localSettings, setLocalSettings] = useState<Settings>(state.settings);
-  useEffect(() => { if (isOpen) setLocalSettings(state.settings); }, [isOpen, state.settings]);
+  const [local, setLocal] = useState<Settings>(state.settings);
+  const [tab, setTab] = useState<'theme' | 'model' | 'effects'>('theme');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (isOpen) { setLocal(state.settings); setTab('theme'); } }, [isOpen, state.settings]);
   if (!isOpen) return null;
-  const colorOptions: { value: Settings['colorTheme']; label: string; class: string }[] = [
-    { value: 'purple', label: 'PURPLE', class: 'bg-purple-600' }, { value: 'cyan', label: 'CYAN', class: 'bg-cyan-600' }, { value: 'green', label: 'GREEN', class: 'bg-green-600' }, { value: 'amber', label: 'AMBER', class: 'bg-amber-600' }, { value: 'hell', label: 'HELL', class: 'bg-[#ff0000] shadow-[0_0_10px_red]' },
+
+  const colors: { value: Settings['colorTheme']; label: string; swatch: string }[] = [
+    { value: 'purple', label: 'PURPLE', swatch: '#a855f7' }, { value: 'cyan', label: 'CYAN', swatch: '#06b6d4' },
+    { value: 'green', label: 'GREEN', swatch: '#22c55e' }, { value: 'amber', label: 'AMBER', swatch: '#f59e0b' },
+    { value: 'mono', label: 'MONO', swatch: '#888' }, { value: 'hell', label: 'HELL', swatch: '#ef4444' },
   ];
+  const presets = [{ label: 'GPT-4o', value: 'gpt-4o' }, { label: 'GPT-4o Mini', value: 'gpt-4o-mini' }, { label: 'Claude Sonnet', value: 'claude-3-5-sonnet-20241022' }, { label: 'Llama 3.1 70B', value: 'llama-3.1-70b' }, { label: 'Custom', value: '' }];
+  const handleSave = async () => { setSaving(true); dispatch({ type: 'UPDATE_SETTINGS', payload: local }); await api.updateEnvSettings({ model: local.model, systemPrompt: local.systemPrompt, summarizationModel: local.summarizationModel, apiKey: local.apiKey }); setSaving(false); onClose(); };
+
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-gray-950 border-2 border-gray-700 p-6 space-y-6 text-gray-300 shadow-2xl">
-        <h2 className="text-xl font-bold tracking-wider border-b border-gray-800 pb-2">SETTINGS</h2>
-        <div className="space-y-4">
-            <div>
-                <label className="text-xs font-bold text-gray-500 mb-2 block">COLOR THEME</label>
-                <div className="flex gap-2">{colorOptions.map(c => (<button key={c.value} onClick={() => setLocalSettings({...localSettings, colorTheme: c.value})} className={cn("h-10 flex-1 border border-gray-800 transition-all", c.class, localSettings.colorTheme === c.value ? "ring-2 ring-white scale-105 opacity-100" : "opacity-40 hover:opacity-80")} />))}</div>
-            </div>
-            <div className="grid grid-cols-2 gap-4 border-t border-gray-800 pt-4">
-                <label className="flex items-center justify-between cursor-pointer col-span-2 bg-white/5 p-2 rounded"><span className="text-sm font-bold">Enable Visual Effects (CRT)</span><input type="checkbox" checked={localSettings.crtEffects} onChange={e => setLocalSettings({...localSettings, crtEffects: e.target.checked})} className="accent-gray-500 scale-125" /></label>
-                <label className="flex items-center justify-between cursor-pointer bg-white/5 p-2 rounded"><span className="text-sm">3D Perspective</span><input type="checkbox" checked={localSettings.enablePerspective} onChange={e => setLocalSettings({...localSettings, enablePerspective: e.target.checked})} disabled={!localSettings.crtEffects} className="accent-gray-500 scale-125 disabled:opacity-50" /></label>
-                <label className="flex items-center justify-between cursor-pointer bg-white/5 p-2 rounded"><span className="text-sm">Scanlines</span><input type="checkbox" checked={localSettings.scanlines} onChange={e => setLocalSettings({...localSettings, scanlines: e.target.checked})} disabled={!localSettings.crtEffects} className="accent-gray-500 scale-125 disabled:opacity-50" /></label>
-            </div>
-            <div className={cn("transition-opacity", !localSettings.crtEffects && "opacity-30 pointer-events-none")}>
-                 <div className="flex justify-between text-xs text-gray-500 mb-1"><span>FISHBOWL INTENSITY</span><span>{(localSettings.fishbowlIntensity * 100).toFixed(0)}%</span></div>
-                 <input type="range" min="0" max="0.5" step="0.05" value={localSettings.fishbowlIntensity} onChange={e => setLocalSettings({...localSettings, fishbowlIntensity: parseFloat(e.target.value)})} className="w-full" />
-            </div>
-            <div className="pt-2 border-t border-gray-800"><label className="text-xs font-bold text-gray-500 mb-1 block">CHAT MODEL ID</label><input value={localSettings.model} onChange={e => setLocalSettings({...localSettings, model: e.target.value})} className="w-full bg-black/50 border border-gray-700 p-2 text-sm font-mono text-gray-400" /></div>
+      <div className="absolute inset-0 modal-backdrop" onClick={onClose} />
+      <div className="relative w-full max-w-xl bezel-frame animate-fade-in-scale overflow-hidden">
+        <div className="bezel-toolbar flex items-center justify-between px-5 py-3 para-header">
+          <div className="flex items-center gap-3 relative z-10"><div className="bezel-led animate-led-pulse" /><h2 className="text-sm font-bold tracking-wider text-emboss" style={{ color: 'var(--text-primary)' }}>SETTINGS</h2></div>
+          <CloseButton onClick={onClose} large />
         </div>
-        <div className="flex gap-2 pt-4"><button onClick={() => { dispatch({type: 'UPDATE_SETTINGS', payload: localSettings}); onClose(); }} className="flex-1 py-3 bg-white/10 hover:bg-white/20 font-bold border border-white/10">SAVE CHANGES</button><button onClick={onClose} className="flex-1 py-3 border border-gray-700 text-gray-500 hover:text-white">CANCEL</button></div>
+
+        <div className="flex px-4 py-2 gap-1" style={{ background: 'var(--surface-2)', borderBottom: '1px solid rgba(0,0,0,0.4)' }}>
+          {[{ k: 'theme', l: 'THEME' }, { k: 'model', l: 'MODEL & AI' }, { k: 'effects', l: 'EFFECTS' }].map(t => (
+            <button key={t.k} onClick={() => setTab(t.k as any)} className={cn("para-tab flex-1", tab === t.k && "para-tab-active")}><span>{t.l}</span></button>
+          ))}
+        </div>
+
+        <div className="p-5 max-h-[55vh] overflow-y-auto custom-scrollbar" style={{ background: 'var(--surface-1)' }}>
+          <div className="bezel-well p-5 space-y-5">
+            {tab === 'theme' && (
+              <div className="animate-fade-in space-y-4">
+                <div className="flex items-center gap-3"><div className="para-accent-wide" style={{ height: '16px' }} /><span className="text-[10px] font-bold tracking-[0.15em] text-engrave uppercase" style={{ color: 'var(--text-dim)' }}>Color Theme</span></div>
+                <div className="grid grid-cols-3 gap-2">
+                  {colors.map(c => (
+                    <button key={c.value} onClick={() => setLocal({ ...local, colorTheme: c.value })}
+                      className={cn("btn h-14 flex flex-col items-center justify-center gap-1 relative overflow-hidden", local.colorTheme === c.value && "btn-pressed !border-[var(--border-color)]")}>
+                      <div className="w-4 h-4" style={{ background: c.swatch, border: '1px solid rgba(0,0,0,0.4)', boxShadow: local.colorTheme === c.value ? `0 0 6px ${c.swatch}, 0 0 12px ${c.swatch}40` : 'inset 0 1px 2px rgba(0,0,0,0.3)' }} />
+                      <span className="text-[8px] tracking-widest">{c.label}</span>
+                      {local.colorTheme === c.value && <div className="absolute right-0 top-0 bottom-0 w-3 opacity-50" style={{ background: c.swatch, transform: 'skewX(var(--skew))' }} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {tab === 'model' && (
+              <div className="animate-fade-in space-y-5">
+                <div>
+                  <div className="flex items-center gap-3 mb-2"><div className="para-accent" style={{ height: '14px' }} /><label className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>OpenRouter API Key</label></div>
+                  <input type="password" value={local.apiKey} onChange={e => setLocal({ ...local, apiKey: e.target.value })} className="input-field input-mono w-full text-[12px]" placeholder="sk-or-v1-..." />
+                </div>
+                <ParaDivider />
+                <div>
+                  <div className="flex items-center gap-3 mb-2"><div className="para-accent" style={{ height: '14px' }} /><label className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>Chat Model</label></div>
+                  <select value={presets.find(p => p.value === local.model) ? local.model : ''} onChange={e => { if (e.target.value !== '') setLocal({ ...local, model: e.target.value }); }} className="select-field w-full mb-2">{presets.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>
+                  <input value={local.model} onChange={e => setLocal({ ...local, model: e.target.value })} className="input-field input-mono w-full text-[12px]" placeholder="Or custom model ID..." />
+                </div>
+                <ParaDivider />
+                <div>
+                  <div className="flex items-center gap-3 mb-2"><div className="para-accent" style={{ height: '14px' }} /><label className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>Summarization Model</label></div>
+                  <input value={local.summarizationModel} onChange={e => setLocal({ ...local, summarizationModel: e.target.value })} className="input-field input-mono w-full text-[12px]" placeholder="Leave empty for chat model..." />
+                </div>
+                <ParaDivider />
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center gap-3"><div className="para-accent" style={{ height: '14px' }} /><label className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>System Prompt</label></div>
+                    <div className="para-badge-glow para-badge"><span>ENV</span></div>
+                  </div>
+                  <textarea value={local.systemPrompt} onChange={e => setLocal({ ...local, systemPrompt: e.target.value })} className="textarea-field font-editor w-full h-28 text-sm" placeholder="You are..." />
+                  <p className="text-[9px] mt-1" style={{ color: 'var(--text-dim)' }}>Base prompt. Lore/profile appended per instance.</p>
+                </div>
+              </div>
+            )}
+            {tab === 'effects' && (
+              <div className="animate-fade-in space-y-2">
+                {[
+                  { label: 'CRT Visual Effects', key: 'crtEffects' as const, desc: 'Master VFX toggle' },
+                  { label: '3D Perspective', key: 'enablePerspective' as const, desc: 'Subtle tilt', p: 'crtEffects' as const },
+                  { label: 'Scanlines', key: 'scanlines' as const, desc: 'Horizontal lines', p: 'crtEffects' as const },
+                  { label: 'Screen Flicker', key: 'flickerEnabled' as const, desc: 'Brightness variation', p: 'crtEffects' as const },
+                  { label: 'Sound Effects', key: 'soundEnabled' as const, desc: 'UI sounds' },
+                ].map(item => (
+                  <div key={item.key} className={cn("bezel-raised flex items-center justify-between p-3 relative overflow-hidden", item.p && !local[item.p] && "opacity-30", item.p && "ml-5")}>
+                    {local[item.key] && <div className="para-accent absolute left-0 top-1 bottom-1" />}
+                    <div className="ml-3">
+                      <div className="text-[12px] font-semibold" style={{ color: 'var(--text-primary)' }}>{item.label}</div>
+                      <div className="text-[9px]" style={{ color: 'var(--text-dim)' }}>{item.desc}</div>
+                    </div>
+                    <ToggleSwitch checked={local[item.key] as boolean} onChange={v => setLocal({ ...local, [item.key]: v })} disabled={!!(item.p && !local[item.p])} />
+                  </div>
+                ))}
+                <div className={cn("bezel-raised p-3", !local.crtEffects && "opacity-30 pointer-events-none")}>
+                  <div className="flex justify-between text-[11px] mb-2"><span style={{ color: 'var(--text-secondary)' }}>Fishbowl</span><span className="font-mono" style={{ color: 'var(--text-dim)' }}>{(local.fishbowlIntensity * 100).toFixed(0)}%</span></div>
+                  <input type="range" min="0" max="0.5" step="0.05" value={local.fishbowlIntensity} onChange={e => setLocal({ ...local, fishbowlIntensity: parseFloat(e.target.value) })} className="w-full" />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bezel-statusbar flex gap-2 px-5 py-3">
+          <button onClick={handleSave} disabled={saving} className={cn("para-btn para-btn-primary flex-1 py-2.5", saving && "opacity-50")}><span>{saving ? 'SAVING...' : 'SAVE'}</span></button>
+          <button onClick={onClose} className="para-btn flex-1 py-2.5"><span>CANCEL</span></button>
+        </div>
       </div>
     </div>
   );
 }
 
+// === CHAT MESSAGE ===
 function ChatMessage({ message, isStreaming, streamingText, onEdit, onDelete, onRegenerate }: any) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
-
   const content = isStreaming ? streamingText : message.content;
   const isUser = message.role === 'user';
 
   return (
-    <div
-      className={cn(
-        "relative p-6 border-l-2 transition-all group",
-        isUser ? "border-l-gray-700 bg-white/5" : "border-l-[var(--border-color)] bg-[var(--bg-tint)]"
-      )}
-    >
-      {/* FIXED: Action Menu - Always rendered, sticky, visible during streaming */}
-      {!isEditing && (
-        <div className="sticky top-0 float-right z-20 -mt-2 -mr-2">
-          <div className="flex gap-1 bg-black border border-gray-800 p-1 text-[10px] font-mono opacity-0 group-hover:opacity-100 transition-opacity duration-200 shadow-xl">
-            <button
-              onClick={() => onRegenerate(message.id)}
-              disabled={isStreaming}
-              className={cn(
-                "px-1.5 py-0.5 text-gray-500 border border-transparent transition-colors",
-                isStreaming
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:text-cyan-400 hover:border-cyan-400/30"
-              )}
-              title="Regenerate"
-            >
-              RGN
-            </button>
-            <button
-              onClick={() => setIsEditing(true)}
-              disabled={isStreaming}
-              className={cn(
-                "px-1.5 py-0.5 text-gray-500 border border-transparent transition-colors",
-                isStreaming
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:text-white hover:border-gray-600"
-              )}
-              title="Edit"
-            >
-              EDT
-            </button>
-            <button
-              onClick={() => onDelete(message.id)}
-              disabled={isStreaming}
-              className={cn(
-                "px-1.5 py-0.5 text-gray-500 border border-transparent transition-colors",
-                isStreaming
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:text-red-500 hover:border-red-500/30"
-              )}
-              title="Delete"
-            >
-              DEL
-            </button>
+    <div className={cn("relative group transition-all")} style={{ background: isUser ? 'var(--surface-2)' : 'var(--bg-tint)' }}>
+      <div className="px-5 py-5">
+        {!editing && (
+          <div className="sticky top-3 float-right z-20 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2">
+            <button onClick={() => onRegenerate(message.id)} disabled={isStreaming} className={cn("para-btn para-btn-sm", isStreaming && "opacity-30 cursor-not-allowed")}><span>↻</span></button>
+            <button onClick={() => { setEditContent(message.content); setEditing(true); }} disabled={isStreaming} className={cn("para-btn para-btn-sm", isStreaming && "opacity-30 cursor-not-allowed")}><span>✎</span></button>
+            <button onClick={() => onDelete(message.id)} disabled={isStreaming} className={cn("para-btn para-btn-sm para-btn-danger", isStreaming && "opacity-30 cursor-not-allowed")}><span>✕</span></button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* HEADER: Role Label */}
-      <div className={cn(
-        "text-xs font-bold tracking-widest mb-3 uppercase flex items-center gap-2 select-none relative z-10",
-        isUser ? 'text-gray-500' : 'text-[var(--glow-color)] text-theme-glow'
-      )}>
-        <span>{isUser ? '>> PLAYER' : '## NARRATOR'}</span>
-        {isStreaming && <span className="animate-pulse">_</span>}
+        <div className={cn("text-[9px] font-bold tracking-[0.2em] mb-3 uppercase flex items-center gap-2 select-none", isUser ? 'text-engrave' : 'glow-text')}>
+          <div className={cn("w-2 h-2", isUser ? "bezel-led-off" : "bezel-led animate-led-pulse")} />
+          <span style={{ color: isUser ? 'var(--text-dim)' : 'var(--accent)' }}>{isUser ? 'PLAYER' : 'NARRATOR'}</span>
+          {!isUser && <div className="para-badge"><span>AI</span></div>}
+          {isStreaming && <span className="animate-blink" style={{ color: 'var(--accent)' }}>▊</span>}
+        </div>
+
+        {editing ? (
+          <div className="space-y-3 animate-fade-in">
+            <textarea
+              value={editContent}
+              onChange={e => setEditContent(e.target.value)}
+              className="textarea-field w-full custom-scrollbar"
+              style={{
+                height: '60vh',
+                fontFamily: 'var(--font-sans)',
+                fontSize: '15px',
+                lineHeight: '1.75',
+                color: 'var(--text-primary)',
+              }}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button onClick={() => { onEdit(message.id, editContent); setEditing(false); }} className="para-btn para-btn-primary para-btn-sm"><span>SAVE</span></button>
+              <button onClick={() => setEditing(false)} className="para-btn para-btn-sm"><span>CANCEL</span></button>
+            </div>
+          </div>
+        ) : (
+          <div className="prose-chat max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content || ''}</ReactMarkdown></div>
+        )}
       </div>
-
-      {/* CONTENT */}
-      {isEditing ? (
-        <div className="space-y-2 animate-fade-in relative z-10">
-          <textarea
-            value={editContent}
-            onChange={e => setEditContent(e.target.value)}
-            className="w-full h-32 bg-black border border-gray-700 p-3 text-sm text-gray-300 focus:outline-none font-mono focus:border-[var(--glow-color)]"
-          />
-          <div className="flex gap-2">
-            <button onClick={() => { onEdit(message.id, editContent); setIsEditing(false); }} className="px-3 py-1 border border-green-900 bg-green-900/20 text-green-500 text-xs font-bold hover:bg-green-900/40">SAVE</button>
-            <button onClick={() => setIsEditing(false)} className="px-3 py-1 border border-gray-800 text-gray-500 text-xs hover:text-white">CANCEL</button>
-          </div>
-        </div>
-      ) : (
-        <div className="text-gray-300 text-sm font-mono leading-relaxed prose prose-invert prose-sm max-w-none whitespace-pre-wrap relative z-10">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || ''}</ReactMarkdown>
-        </div>
-      )}
+      <div className="bezel-separator mx-0" />
     </div>
   );
 }
 
+// === SIDEBAR ===
 function Sidebar() {
   const { state, dispatch } = useApp();
   const [view, setView] = useState<'play' | 'shows'>('play');
-  const handleDeleteInstance = async (e: React.MouseEvent, id: string) => { e.stopPropagation(); if(confirm("Delete this save file?")) { await api.deleteInstance(id); dispatch({ type: 'REMOVE_INSTANCE', payload: id }); } };
   return (
-    <div className="w-72 h-full bg-black/90 border-r border-[var(--border-color)] flex flex-col z-10 relative">
-      <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-tint)]"><div className="text-center"><div className="text-lg font-bold tracking-wider mt-1 text-[var(--glow-color)] text-theme-glow">LOREKEEPER</div></div></div>
-      <div className="flex border-b border-[var(--border-color)]"><button onClick={() => setView('play')} className={cn("flex-1 py-3 text-xs font-bold transition-all", view === 'play' ? "bg-white/10 text-white" : "opacity-40 hover:opacity-100")}>SAVES</button><button onClick={() => setView('shows')} className={cn("flex-1 py-3 text-xs font-bold transition-all", view === 'shows' ? "bg-white/10 text-white" : "opacity-40 hover:opacity-100")}>BLUEPRINTS</button></div>
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-        {view === 'play' && (
-          <>
-            {state.instances.length === 0 && <div className="text-center text-xs text-gray-600 mt-8">No active games.</div>}
-            {state.instances.map(inst => (
-              <div key={inst.id} onClick={() => dispatch({ type: 'SET_CURRENT_INSTANCE', payload: inst })} className={cn("p-3 border cursor-pointer relative group transition-all", state.currentInstance?.id === inst.id ? "border-[var(--glow-color)] bg-[var(--bg-tint)] text-white shadow-[0_0_10px_var(--bg-tint)]" : "border-gray-800 text-gray-500 hover:border-gray-600")}>
-                <div className="text-sm font-bold truncate pr-4">{inst.showName}</div>
-                <div className="text-xs mt-1 opacity-70">{inst.currentEpisodeIndex >= inst.episodes.length ? "COMPLETE" : `Ep ${inst.currentEpisodeIndex + 1}: ${inst.episodes[inst.currentEpisodeIndex]?.name}`}</div>
-                <div className="text-[10px] opacity-40 mt-1">{new Date(inst.lastPlayed).toLocaleDateString()}</div>
-                <button onClick={(e) => handleDeleteInstance(e, inst.id)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-red-500 font-bold">✕</button>
-              </div>
-            ))}
-          </>
-        )}
-        {view === 'shows' && (
-          <>
-            <button onClick={() => dispatch({ type: 'SET_EDITING_SHOW', payload: null })} className="w-full py-3 mb-2 border border-[var(--border-color)] text-[var(--glow-color)] text-xs font-bold tracking-wider hover:bg-white/5 transition">+ NEW BLUEPRINT</button>
-            {state.shows.map(show => (
-              <div key={show.id} className="p-3 border border-gray-800 text-gray-500 hover:border-gray-600 relative group">
-                <div className="text-sm font-bold truncate pr-6">{show.name}</div>
-                <div className="text-[10px] opacity-40 mt-1">{show.episodes.length} Chapters</div>
-                <div className="flex gap-2 mt-2">
-                  <button onClick={() => dispatch({ type: 'SET_EDITING_SHOW', payload: show })} className="text-[10px] border border-gray-700 px-2 py-1 hover:text-white">EDIT</button>
-                  <button onClick={async () => { const inst = await api.createInstance(show.id); dispatch({ type: 'ADD_INSTANCE', payload: inst }); dispatch({ type: 'SET_CURRENT_INSTANCE', payload: inst }); setView('play'); }} className="text-[10px] border border-gray-700 px-2 py-1 hover:text-white hover:bg-white/10">PLAY</button>
+    <div className="w-72 h-full flex flex-col z-10 relative bezel-raised" style={{ borderRight: '2px solid rgba(0,0,0,0.5)' }}>
+      <div className="bezel-toolbar p-4 para-header">
+        <div className="flex items-center gap-3 relative z-10">
+          <div className="bezel-frame w-9 h-9 flex items-center justify-center"><span className="text-sm font-bold glow-text-strong" style={{ color: 'var(--accent)' }}>◈</span></div>
+          <div>
+            <div className="text-sm font-bold tracking-wider text-emboss" style={{ color: 'var(--text-primary)' }}>LOREKEEPER</div>
+            <div className="text-[8px] tracking-[0.2em] font-mono" style={{ color: 'var(--text-dim)' }}>TERMINAL v4.2</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex p-2 gap-1" style={{ background: 'var(--surface-2)', borderBottom: '1px solid rgba(0,0,0,0.4)' }}>
+        <button onClick={() => setView('play')} className={cn("para-tab flex-1", view === 'play' && "para-tab-active")}><span>SAVES</span></button>
+        <button onClick={() => setView('shows')} className={cn("para-tab flex-1", view === 'shows' && "para-tab-active")}><span>BLUEPRINTS</span></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar" style={{ background: 'var(--surface-1)' }}>
+        <div className="bezel-well p-2 space-y-2 h-full">
+          {view === 'play' && (
+            <>
+              {state.instances.length === 0 && <div className="text-center mt-12" style={{ color: 'var(--text-dim)' }}><div className="text-2xl opacity-30 mb-2">◇</div><div className="text-[11px] text-engrave">No active games</div></div>}
+              {state.instances.map(inst => {
+                const isActive = state.currentInstance?.id === inst.id;
+                const epCount = inst.episodes.length;
+                const currentIdx = inst.currentEpisodeIndex;
+                return (
+                  <div key={inst.id} onClick={() => dispatch({ type: 'SET_CURRENT_INSTANCE', payload: inst })}
+                    className={cn("card p-3 cursor-pointer group relative overflow-hidden", isActive && "card-active")}>
+                    <div className="para-stripe" />
+                    <div className="flex items-start justify-between relative z-10">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12px] font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{inst.showName}</div>
+                        <div className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                          {currentIdx >= epCount ? <div className="para-badge-glow para-badge"><span>COMPLETE</span></div> : `Ep ${currentIdx + 1}: ${inst.episodes[currentIdx]?.name}`}
+                        </div>
+                        {currentIdx < epCount && <div className="mt-2"><ParaProgress current={currentIdx + 1} total={epCount} /></div>}
+                        <div className="text-[9px] font-mono mt-1" style={{ color: 'var(--text-dim)' }}>{new Date(inst.lastPlayed).toLocaleDateString()}</div>
+                      </div>
+                      <button onClick={e => { e.stopPropagation(); if (confirm("Delete save?")) { api.deleteInstance(inst.id); dispatch({ type: 'REMOVE_INSTANCE', payload: inst.id }); } }} className="opacity-0 group-hover:opacity-100 transition-opacity"><CloseButton onClick={() => {}} /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {view === 'shows' && (
+            <>
+              <button onClick={() => dispatch({ type: 'SET_EDITING_SHOW', payload: null })} className="para-btn w-full py-3 mb-1" style={{ color: 'var(--accent)' }}><span>+ NEW BLUEPRINT</span></button>
+              {state.shows.map(show => (
+                <div key={show.id} className="card p-3 group relative overflow-hidden">
+                  <div className="para-stripe" />
+                  <div className="flex items-start justify-between relative z-10">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{show.name}</div>
+                      <div className="text-[9px] font-mono mt-1" style={{ color: 'var(--text-dim)' }}>{show.episodes.length} chapters</div>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); if (confirm("Delete?")) { api.deleteShow(show.id); dispatch({ type: 'REMOVE_SHOW', payload: show.id }); } }} className="opacity-0 group-hover:opacity-100 transition-opacity"><CloseButton onClick={() => {}} /></button>
+                  </div>
+                  <div className="flex gap-1.5 mt-3 relative z-10">
+                    <button onClick={() => dispatch({ type: 'SET_EDITING_SHOW', payload: show })} className="para-btn para-btn-sm flex-1"><span>EDIT</span></button>
+                    <button onClick={async () => { const i = await api.createInstance(show.id); dispatch({ type: 'ADD_INSTANCE', payload: i }); dispatch({ type: 'SET_CURRENT_INSTANCE', payload: i }); setView('play'); }} className="para-btn para-btn-sm para-btn-primary flex-1"><span>PLAY</span></button>
+                  </div>
                 </div>
-                <button onClick={async (e) => { e.stopPropagation(); if(confirm("Delete blueprint?")) { await api.deleteShow(show.id); dispatch({ type: 'REMOVE_SHOW', payload: show.id }); }}} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-red-500 font-bold">✕</button>
-              </div>
-            ))}
-          </>
-        )}
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="bezel-statusbar px-3 py-2 flex items-center gap-2">
+        <div className="bezel-led animate-led-pulse" />
+        <span className="text-[8px] font-mono tracking-widest" style={{ color: 'var(--text-dim)' }}>SYSTEM ONLINE</span>
+        <div className="flex-1" />
+        <div className="flex gap-1 opacity-30">
+          <div style={{ width: 8, height: 4, background: 'var(--accent)', transform: 'skewX(var(--skew))' }} />
+          <div style={{ width: 4, height: 4, background: 'var(--accent)', transform: 'skewX(var(--skew))', opacity: 0.5 }} />
+        </div>
       </div>
     </div>
   );
 }
 
+// === CHAT AREA ===
 export function ChatArea() {
   const { state, dispatch } = useApp();
   const [input, setInput] = useState('');
-  const [rewindingTo, setRewindingTo] = useState<string | null>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const atBottom = useRef(true);
   const { playMessageSent, playKeyClick } = useSound(state.settings.soundEnabled);
-
   const colors = themeColors[state.settings.colorTheme as keyof typeof themeColors];
-  const borderCol = state.settings.colorTheme === 'purple' ? 'border-purple-500' : state.settings.colorTheme === 'cyan' ? 'border-cyan-500' : state.settings.colorTheme === 'green' ? 'border-green-500' : state.settings.colorTheme === 'amber' ? 'border-amber-500' : 'border-red-600';
 
-  useLayoutEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-    }
-  }, [state.messages, state.streamingText]);
+  const onScroll = useCallback(() => { if (ref.current) { const { scrollTop, scrollHeight, clientHeight } = ref.current; atBottom.current = scrollHeight - scrollTop - clientHeight < 10; } }, []);
+  useLayoutEffect(() => { if (atBottom.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [state.messages, state.streamingText]);
 
-  const sendToAPI = useCallback(async (userMessage: string, historyOverride?: any[]) => {
-    dispatch({ type: 'SET_GENERATING', payload: true });
-    let fullResponse = '';
+  const sendToAPI = useCallback(async (msg: string, hist?: any[]) => {
+    dispatch({ type: 'SET_GENERATING', payload: true }); let full = '';
     try {
-      const history = historyOverride || state.messages.map(m => ({ role: m.role, content: m.content }));
-      const request = {
-        message: userMessage,
-        model: state.settings.model,
-        instanceId: state.currentInstance?.id,
-        history: history,
-        lore: state.lore,
-        profile: state.profile
-      };
+      const h = hist || state.messages.map(m => ({ role: m.role, content: m.content }));
+      for await (const t of api.chat({ message: msg, model: state.settings.model, systemPrompt: state.settings.systemPrompt, instanceId: state.currentInstance?.id, history: h, lore: state.lore, profile: state.profile })) { full += t; dispatch({ type: 'SET_STREAMING_TEXT', payload: full }); }
+      dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: full } });
+    } catch (e) { if ((e as Error).name !== 'AbortError') dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: "Error: Backend unreachable." } }); else if (full) dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: full + " [STOPPED]" } }); }
+    dispatch({ type: 'SET_STREAMING_TEXT', payload: '' }); dispatch({ type: 'SET_GENERATING', payload: false });
+  }, [dispatch, state.currentInstance, state.messages, state.lore, state.profile, state.settings.model, state.settings.systemPrompt]);
 
-      for await (const token of api.chat(request)) {
-        fullResponse += token;
-        dispatch({ type: 'SET_STREAMING_TEXT', payload: fullResponse });
-      }
+  const handleRegenerate = useCallback((id: string) => {
+    if (state.isGenerating || !state.currentInstance) return;
+    const idx = state.messages.findIndex(m => m.id === id); if (idx === -1) return;
+    const msg = state.messages[idx]; let nm; let lum = '';
+    if (msg.role === 'ai') { nm = state.messages.slice(0, idx); const ui = [...nm].reverse().findIndex(m => m.role === 'user'); if (ui !== -1) lum = nm[nm.length - 1 - ui].content; }
+    else { nm = state.messages.slice(0, idx + 1); lum = msg.content; }
+    dispatch({ type: 'SET_MESSAGES', payload: nm });
+    setTimeout(() => sendToAPI(lum, nm.map(m => ({ role: m.role, content: m.content }))), 100);
+  }, [state.isGenerating, state.currentInstance, state.messages, dispatch, sendToAPI]);
 
-      dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: fullResponse } });
-      dispatch({ type: 'UPDATE_TOKEN_USAGE', payload: { prompt: userMessage.length, response: fullResponse.length } });
-    } catch (error) {
-      if ((error as Error).name !== 'AbortError') {
-         console.error(error);
-         dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: "Error: Backend unreachable or stream failed." } });
-      } else {
-         if (fullResponse) {
-             dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'ai', content: fullResponse + " [STOPPED]" } });
-         }
-      }
-    }
-    dispatch({ type: 'SET_STREAMING_TEXT', payload: '' });
-    dispatch({ type: 'SET_GENERATING', payload: false });
-  }, [dispatch, state.currentInstance, state.messages, state.lore, state.profile, state.settings.model]);
+  const handleSend = () => { if (!input.trim() || state.isGenerating || !state.currentInstance) return; playMessageSent(); atBottom.current = true; const m = input.trim(); setInput(''); dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'user', content: m } }); setTimeout(() => sendToAPI(m), 100); };
 
-  const onRewindComplete = useCallback(() => {
-    if (!rewindingTo || !state.currentInstance) { setRewindingTo(null); return; }
-    const index = state.messages.findIndex(m => m.id === rewindingTo);
-    if (index === -1) { setRewindingTo(null); return; }
-    const message = state.messages[index];
-    let newMessages;
-    let lastUserMessage = '';
-
-    // Logic for Regenerate
-    if (message.role === 'ai') {
-        newMessages = state.messages.slice(0, index);
-        const lastUserIndex = [...newMessages].reverse().findIndex(m => m.role === 'user');
-        if (lastUserIndex !== -1) lastUserMessage = newMessages[newMessages.length - 1 - lastUserIndex].content;
-    } else {
-        newMessages = state.messages.slice(0, index + 1);
-        lastUserMessage = message.content;
-    }
-    dispatch({ type: 'SET_MESSAGES', payload: newMessages });
-    setRewindingTo(null);
-    setTimeout(() => sendToAPI(lastUserMessage, newMessages.map(m => ({ role: m.role, content: m.content }))), 100);
-
-  }, [rewindingTo, state.currentInstance, state.messages, dispatch, sendToAPI]);
-
-  const handleSend = () => {
-    if (!input.trim() || state.isGenerating || !state.currentInstance) return;
-    playMessageSent();
-    const msg = input.trim(); setInput('');
-    dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'user', content: msg } });
-    setTimeout(() => sendToAPI(msg), 100);
-  };
-
-  const handleStop = () => {
-    api.stop();
-    dispatch({ type: 'SET_GENERATING', payload: false });
-  };
-
-  const currentEp = state.currentInstance ? state.currentInstance.episodes[state.currentInstance.currentEpisodeIndex] : null;
-  const isFinished = state.currentInstance && !currentEp;
+  const ep = state.currentInstance ? state.currentInstance.episodes[state.currentInstance.currentEpisodeIndex] : null;
+  const done = state.currentInstance && !ep;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-      <RewindOverlay isActive={rewindingTo !== null} onComplete={onRewindComplete} colorTheme={state.settings.colorTheme} mode="regenerate" />
-
+    <div className="flex-1 flex flex-col h-full overflow-hidden relative" style={{ background: 'var(--surface-1)' }}>
       {state.currentInstance && (
-        <div className="p-2 border-b border-gray-800 flex justify-between items-center select-none bg-[#0a0a0a] text-xs">
-          <div><span className="opacity-50 tracking-widest mr-2">INSTANCE:</span><span className="font-bold">{state.currentInstance.showName}</span></div>
-          <div><span className="opacity-50 tracking-widest mr-2">EPISODE:</span><span className="font-bold">{currentEp ? currentEp.name : "CAMPAIGN COMPLETE"}</span></div>
+        <div className="bezel-toolbar px-5 py-2.5 flex justify-between items-center select-none shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="bezel-led animate-led-pulse" />
+            <div className="para-badge"><span>INSTANCE</span></div>
+            <span className="text-[11px] font-semibold" style={{ color: 'var(--text-primary)' }}>{state.currentInstance.showName}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="para-badge"><span>EPISODE</span></div>
+            <span className="text-[11px] font-semibold" style={{ color: 'var(--text-primary)' }}>{ep ? ep.name : <span className="para-badge-glow para-badge"><span>COMPLETE</span></span>}</span>
+            {ep && <div className="w-24"><ParaProgress current={state.currentInstance.currentEpisodeIndex + 1} total={state.currentInstance.episodes.length} /></div>}
+          </div>
         </div>
       )}
 
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto custom-scrollbar relative bg-black/20">
-        {!state.currentInstance ? (
-          <div className="h-full flex flex-col items-center justify-center opacity-50"><div className="text-4xl mb-4 font-mono tracking-[0.2em] border border-white/20 px-4 py-2">CRISTOL</div><div className="text-xs tracking-widest">SELECT OR START A CAMPAIGN</div></div>
-        ) : isFinished ? (
-            <div className="h-full flex flex-col items-center justify-center text-green-500"><div className="text-4xl mb-2">COMPLETE</div><div className="text-sm">You have finished this journey.</div></div>
-        ) : state.messages.length === 0 && !state.isGenerating ? (
-          <div className="p-8 text-center opacity-70 mt-10"><div className={cn("text-xl mb-4 font-bold", colors.primary)}>CONTEXT</div><div className="italic text-gray-400 max-w-lg mx-auto leading-relaxed">{currentEp?.context}</div><div className="mt-8 text-sm animate-pulse">Waiting for input...</div></div>
-        ) : (
-          <div className="divide-y divide-gray-800/50 pb-4">
-             {state.messages.map((m) => (
-                <ChatMessage
-                  key={m.id}
-                  message={m}
-                  isStreaming={false}
-                  streamingText=""
-                  onEdit={(id: string,c: string) => dispatch({type: 'UPDATE_MESSAGE', payload: {id, content:c}})}
-                  onDelete={(id: string) => dispatch({type: 'DELETE_MESSAGE', payload: id})}
-                  onRegenerate={(id: string) => { if (state.isGenerating) return; setRewindingTo(id); }}
-                />
-             ))}
-             {state.streamingText && (
-               <ChatMessage
-                  message={{id:'stream', role:'ai', content: state.streamingText}}
-                  isStreaming={true}
-                  streamingText={state.streamingText}
-                  onEdit={()=>{}} onDelete={()=>{}} onRegenerate={()=>{}}
-                />
-             )}
-          </div>
-        )}
+      <div className="flex-1 overflow-hidden p-3">
+        <div ref={ref} onScroll={onScroll} className="bezel-well h-full overflow-y-auto custom-scrollbar">
+          {!state.currentInstance ? (
+            <div className="h-full flex flex-col items-center justify-center">
+              <div className="text-center space-y-4">
+                <div className="text-4xl glow-text-strong" style={{ color: 'var(--accent)' }}>◈</div>
+                <div className="text-lg font-bold tracking-[0.2em] text-emboss" style={{ color: 'var(--text-primary)' }}>CRISTOL</div>
+                <ParaDivider />
+                <div className="text-[10px] tracking-widest text-engrave" style={{ color: 'var(--text-dim)' }}>SELECT OR START A CAMPAIGN</div>
+              </div>
+            </div>
+          ) : done ? (
+            <div className="h-full flex flex-col items-center justify-center">
+              <div className="text-center space-y-3"><div className="text-4xl glow-text-strong" style={{ color: '#22c55e' }}>✦</div><div className="text-xl font-bold text-emboss" style={{ color: '#22c55e' }}>COMPLETE</div><ParaDivider /><div className="text-sm" style={{ color: 'var(--text-muted)' }}>Journey finished.</div></div>
+            </div>
+          ) : state.messages.length === 0 && !state.isGenerating ? (
+            <div className="p-10 text-center mt-10 animate-fade-in">
+              <div className={cn("text-base mb-4 font-bold tracking-wider glow-text", colors.primary)}>{ep?.name}</div>
+              <ParaDivider />
+              <div className="italic max-w-lg mx-auto leading-relaxed text-sm mt-4 font-story" style={{ color: 'var(--text-secondary)' }}>{ep?.context}</div>
+              <div className="mt-8 flex items-center justify-center gap-2"><div className="bezel-led animate-led-pulse" /><span className="text-[10px] tracking-widest" style={{ color: 'var(--text-dim)' }}>Awaiting input...</span></div>
+            </div>
+          ) : (
+            <div className="pb-4">
+              {state.messages.map(m => <ChatMessage key={m.id} message={m} isStreaming={false} streamingText="" onEdit={(id: string, c: string) => dispatch({ type: 'UPDATE_MESSAGE', payload: { id, content: c } })} onDelete={(id: string) => dispatch({ type: 'DELETE_MESSAGE', payload: id })} onRegenerate={handleRegenerate} />)}
+              {state.streamingText && <ChatMessage message={{ id: 'stream', role: 'ai', content: state.streamingText }} isStreaming streamingText={state.streamingText} onEdit={() => {}} onDelete={() => {}} onRegenerate={() => {}} />}
+            </div>
+          )}
+        </div>
       </div>
 
-      {state.currentInstance && !isFinished && (
-        <div className="p-4 border-t border-gray-800 bg-[#0a0a0a]">
-           <div className="flex gap-2 relative">
-             <div className="absolute -top-3 left-0 text-[10px] text-gray-500 font-mono">
-               {state.isGenerating ? "STREAMING_ACTIVE // TYPING ENABLED" : "READY"}
-             </div>
-             <textarea
-               value={input}
-               onChange={e => setInput(e.target.value)}
-               onKeyDown={e => {
-                 if(e.key === 'Enter' && e.ctrlKey) {
-                    if (state.isGenerating) return;
-                    handleSend();
-                 } else {
-                    playKeyClick();
-                 }
-               }}
-               className={cn("flex-1 h-20 bg-black border p-3 text-sm focus:outline-none resize-none font-mono text-gray-300", state.isGenerating ? "border-gray-800" : "border-gray-700 focus:" + borderCol)}
-               placeholder={state.isGenerating ? "Typing..." : "Enter action... (Ctrl+Enter)"}
-               autoFocus
-             />
-             {state.isGenerating ? (
-               <button onClick={handleStop} className="px-6 border font-bold text-sm bg-red-900/20 text-red-500 border-red-800 hover:bg-red-900/40 transition-all animate-pulse">STOP</button>
-             ) : (
-               <button onClick={handleSend} disabled={!input.trim()} className={cn("px-6 border font-bold text-sm hover:bg-white/10 transition-all", borderCol, colors.primary)}>SEND</button>
-             )}
-           </div>
+      {state.currentInstance && !done && (
+        <div className="bezel-statusbar px-4 py-3 shrink-0">
+          <div className="flex gap-2 relative">
+            <div className="absolute -top-2 left-0 flex items-center gap-2">
+              {state.isGenerating ? <><div className="bezel-led animate-led-pulse" style={{ width: 5, height: 5 }} /><span className="text-[8px] font-mono tracking-wider" style={{ color: 'var(--text-dim)' }}>STREAMING</span></> : <span className="text-[8px] font-mono tracking-wider" style={{ color: 'var(--text-dim)' }}>READY</span>}
+            </div>
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) { if (!state.isGenerating) handleSend(); } else playKeyClick(); }} className={cn("textarea-field flex-1 h-20 text-sm font-story custom-scrollbar", state.isGenerating && "opacity-60")} placeholder={state.isGenerating ? "Streaming..." : "Enter action... (Ctrl+Enter)"} autoFocus />
+            {state.isGenerating ? (
+              <button onClick={() => { api.stop(); dispatch({ type: 'SET_GENERATING', payload: false }); }} className="para-btn para-btn-danger self-stretch"><span>STOP</span></button>
+            ) : (
+              <button onClick={handleSend} disabled={!input.trim()} className={cn("para-btn self-stretch", input.trim() ? "para-btn-primary" : "")} style={!input.trim() ? { color: 'var(--text-dim)' } : {}}><span>SEND</span></button>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+// === HEADER ===
 function Header({ onOpenSettings, onFinishEpisode }: any) {
   const { state } = useApp();
-  const textColor = state.settings.colorTheme === 'purple' ? 'text-purple-400' : state.settings.colorTheme === 'cyan' ? 'text-cyan-400' : state.settings.colorTheme === 'green' ? 'text-green-400' : state.settings.colorTheme === 'amber' ? 'text-amber-400' : 'text-red-500';
-
   return (
-    <div className="h-12 bg-black border-b border-gray-800 flex items-center justify-between px-4 z-50 shrink-0">
-      <div className={cn("flex items-center gap-3", textColor)}>
-        <div className="text-lg">◈</div>
-        <div className="font-bold tracking-wider">CRISTOL TERMINAL</div>
-        <div className="text-xs text-gray-600 tracking-wider">v4.2</div>
+    <div className="bezel-toolbar h-11 flex items-center justify-between px-5 z-50 shrink-0 para-header">
+      <div className="flex items-center gap-3 relative z-10">
+        <span className="text-sm glow-text-strong font-bold" style={{ color: 'var(--accent)' }}>◈</span>
+        <span className="text-[12px] font-bold tracking-wider text-emboss" style={{ color: 'var(--text-primary)' }}>CRISTOL TERMINAL</span>
+        <div className="para-badge"><span>v4.2</span></div>
+        {state.settings.model && <span className="text-[9px] font-mono ml-2 hidden sm:inline" style={{ color: 'var(--text-dim)' }}>MODEL: {state.settings.model}</span>}
+        <div className="hidden md:flex gap-1 ml-4 opacity-20">
+          {[12, 8, 5, 3].map((w, i) => <div key={i} style={{ width: w, height: 4, background: 'var(--accent)', transform: 'skewX(var(--skew))' }} />)}
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        {state.currentInstance && state.messages.length > 0 &&
-          <button onClick={onFinishEpisode} className={cn("px-3 py-1.5 text-[10px] font-bold font-mono tracking-wider border border-[var(--border-color)] text-[var(--glow-color)] hover:bg-[var(--bg-tint)] transition-all")}>
-            FINISH EPISODE
-          </button>
-        }
-        <button onClick={onOpenSettings} className="p-2 text-gray-500 hover:text-white hover:bg-white/10 transition-all group" aria-label="Settings">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:rotate-90 transition-transform duration-500">
-                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-            </svg>
+      <div className="flex items-center gap-2 relative z-10">
+        {state.currentInstance && state.messages.length > 0 && (
+          <button onClick={onFinishEpisode} className="para-btn para-btn-sm" style={{ color: 'var(--accent)' }}><span>FINISH EP</span></button>
+        )}
+        <button onClick={onOpenSettings} className="btn btn-ghost !p-2 group" aria-label="Settings">
+          <div className="group-hover:rotate-90 transition-transform duration-500" style={{ color: 'var(--text-muted)' }}><SettingsIcon size={15} /></div>
         </button>
       </div>
     </div>
   );
 }
 
+// === MAIN LAYOUT ===
 function MainLayout() {
   const { state, dispatch } = useApp();
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
+  const [sOpen, setSOpen] = useState(false);
+  const [fOpen, setFOpen] = useState(false);
 
   return (
     <div
-      className={cn(
-        "flex h-screen w-screen overflow-hidden bg-black text-gray-200 font-sans selection:bg-[var(--glow-color)] selection:text-white",
-        `theme-${state.settings.colorTheme}`
-      )}
+      className="flex h-screen w-screen overflow-hidden"
+      style={{ background: 'var(--surface-0)', color: 'var(--text-primary)' }}
       data-theme={state.settings.colorTheme}
       data-vfx={state.settings.crtEffects ? "enabled" : "disabled"}
-      style={{
-        imageRendering: 'crisp-edges',
-        WebkitFontSmoothing: 'antialiased',
-        MozOsxFontSmoothing: 'grayscale'
-      }}
     >
       <CRTOverlay />
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      {/* Fix: Distinguish between editingShow=null (New) and undefined (Closed) */}
-      <EditShowModal isOpen={state.editingShow !== undefined} onClose={() => dispatch({ type: 'SET_EDITING_SHOW', payload: undefined })} show={state.editingShow} />
-      <FinishEpisodeModal isOpen={isFinishModalOpen} onClose={() => setIsFinishModalOpen(false)} />
+      <SettingsModal isOpen={sOpen} onClose={() => setSOpen(false)} />
+      <EditShowModal
+        isOpen={state.editingShow !== undefined}
+        onClose={() => dispatch({ type: 'SET_EDITING_SHOW', payload: undefined })}
+        show={state.editingShow}
+      />
+      <FinishEpisodeModal isOpen={fOpen} onClose={() => setFOpen(false)} />
 
-      {state.settings.enablePerspective ? (
-        <div className="perspective-container" style={{ height: '100vh', width: '100vw', overflow: 'hidden' }}>
-          <div className="crt-monitor" style={{
-            "--tilt-x": "0deg",
-            "--tilt-y": "0deg",
-          } as React.CSSProperties}>
-            <div className="monitor-content flex flex-col h-full">
-               <Header onOpenSettings={() => setIsSettingsOpen(true)} onFinishEpisode={() => setIsFinishModalOpen(true)} />
-               <div className="flex-1 flex overflow-hidden">
-                 <Sidebar />
-                 <ChatArea />
-               </div>
-            </div>
+      <div className="flex flex-col w-full h-full p-1.5 gap-1">
+        <Header onOpenSettings={() => setSOpen(true)} onFinishEpisode={() => setFOpen(true)} />
+
+        <div className="flex flex-1 overflow-hidden gap-1">
+          <Sidebar />
+          <ChatArea />
+        </div>
+
+        {/* Status bar - moved INSIDE the flex-col container */}
+        <div className="bezel-statusbar h-5 flex items-center justify-center shrink-0">
+          <div className="para-divider w-1/3">
+            <div className="para-divider-shard" />
+            <div className="para-divider-center" />
+            <div className="para-divider-shard" />
           </div>
         </div>
-      ) : (
-        <div className="flex flex-col h-full w-full">
-           <Header onOpenSettings={() => setIsSettingsOpen(true)} onFinishEpisode={() => setIsFinishModalOpen(true)} />
-           <div className="flex-1 flex overflow-hidden">
-             <Sidebar />
-             <ChatArea />
-           </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
-root.render(
-  <React.StrictMode>
+// === APP ROOT ===
+function App() {
+  return (
     <AppProvider>
       <MainLayout />
     </AppProvider>
+  );
+}
+
+// === MOUNT ===
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
   </React.StrictMode>
 );

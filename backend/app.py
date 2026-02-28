@@ -12,13 +12,20 @@ from datetime import datetime
 from pathlib import Path
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-load_dotenv()
+BASE_DIR = Path(__file__).parent
+dotenv_path = BASE_DIR / '.env'
+
+# Ensure .env exists before loading
+if not dotenv_path.exists():
+    dotenv_path.touch()
+
+load_dotenv(dotenv_path)
 
 app = Flask(__name__)
 CORS(app)
@@ -29,13 +36,11 @@ OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '')
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1"
 
 # Model Defaults
-_env_model = os.getenv('OPENROUTER_MODEL')
-CHAT_MODEL = _env_model if _env_model else 'anthropic/claude-sonnet-4'
-SUMMARY_MODEL = _env_model if _env_model else 'anthropic/claude-sonnet-4'
+CHAT_MODEL = os.getenv('OPENROUTER_MODEL', 'anthropic/claude-sonnet-4')
+SUMMARY_MODEL = os.getenv('SUMMARY_MODEL', CHAT_MODEL)
 COST_SAVING_MODE = os.getenv('COST_SAVING_MODE', 'true').lower() in {'1', 'true', 'yes', 'on'}
 
 # Directory Setup
-BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / 'data'
 SHOWS_DIR = DATA_DIR / 'shows'
 INSTANCES_DIR = DATA_DIR / 'instances'
@@ -342,20 +347,9 @@ def advance_transcript_progress(instance, episode_index, chunk_index):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def build_prompt_chain(instance):
-    """
-    Constructs the full message chain for the API call.
-
-    Structure:
-      1. SYSTEM: Anchor + System Prompt
-      2. Short persistent context (lore + profile + optional summary)
-      3. Rolling summary + previous chunk summaries (if any)
-      4. Current transcript chunk only
-      5. Last assistant message + recent history
-      6. Final user message + reinforcement
-    """
     messages = []
 
-    # ─── 1. SYSTEM MESSAGE ────────────────────────────────────────────────
+    # 1. SYSTEM MESSAGE
     anchor = load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
     system_prompt = load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
     messages.append({
@@ -368,7 +362,7 @@ def build_prompt_chain(instance):
     current_chunk_id = ensure_transcript_state(instance, len(chunks))
     current_chunk = chunks[current_chunk_id] if chunks else ""
 
-    # ─── 2. PERSISTENT CONTEXT (minimal) ─────────────────────────────────
+    # 2. PERSISTENT CONTEXT
     context_parts = []
 
     lore = instance.get('lore', '').strip()
@@ -405,7 +399,7 @@ def build_prompt_chain(instance):
     if context_parts:
         messages.append({"role": "user", "content": "\n\n".join(context_parts)})
 
-    # ─── 3. CURRENT TRANSCRIPT CHUNK ONLY ────────────────────────────────
+    # 3. CURRENT TRANSCRIPT CHUNK
     if current_chunk:
         messages.append({
             "role": "user",
@@ -416,7 +410,7 @@ def build_prompt_chain(instance):
             )
         })
 
-    # ─── 4. LAST ASSISTANT + RECENT HISTORY ─────────────────────────────
+    # 4. HISTORY
     conv_messages = instance.get('messages', [])
     max_history = 12 if not COST_SAVING_MODE else 8
     recent_messages = conv_messages[-max_history:] if conv_messages else []
@@ -449,7 +443,7 @@ def build_prompt_chain(instance):
     if last_assistant_msg:
         messages.append({"role": "assistant", "content": last_assistant_msg})
 
-    # ─── 5. FINAL USER MESSAGE + REINFORCEMENT ──────────────────────────
+    # 5. FINAL USER MESSAGE + REINFORCEMENT
     reinforcement = load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
 
     final_parts = []
@@ -474,17 +468,6 @@ def build_prompt_chain(instance):
     final_parts.append(f"\n{reinforcement}")
     messages.append({"role": "user", "content": "\n\n".join(final_parts)})
 
-    transcript_len = len(current_chunk) if current_chunk else 0
-    history_count = len(recent_messages)
-    print(
-        f"[CHAIN] Messages: {len(messages)} | "
-        f"Episode: {ep_name} | "
-        f"Chunk: {current_chunk_id + 1}/{max(len(chunks), 1)} | "
-        f"ChunkSize: {transcript_len} chars | "
-        f"History: {history_count} | "
-        f"Start: {is_episode_start} | "
-        f"CostSaving: {COST_SAVING_MODE}"
-    )
     return messages, {
         "episodeIndex": ep_idx,
         "chunkIndex": current_chunk_id,
@@ -516,6 +499,47 @@ if not list(SHOWS_DIR.glob('*.json')):
 #                              ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.route('/settings', methods=['GET', 'PUT'])
+def handle_settings():
+    global CHAT_MODEL, SUMMARY_MODEL, OPENROUTER_API_KEY
+
+    if request.method == 'GET':
+        sys_prompt = load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
+        return jsonify({
+            "model": CHAT_MODEL,
+            "summarization_model": SUMMARY_MODEL,
+            "system_prompt": sys_prompt,
+            "api_key": OPENROUTER_API_KEY
+        })
+
+    if request.method == 'PUT':
+        data = request.json
+
+        if 'system_prompt' in data:
+            with open(PROMPTS_DIR / "SYSTEM_PROMPT.txt", "w", encoding="utf-8") as f:
+                f.write(data['system_prompt'].strip())
+
+        if 'model' in data:
+            val = data['model'].strip()
+            set_key(str(dotenv_path), "OPENROUTER_MODEL", val)
+            os.environ["OPENROUTER_MODEL"] = val
+            CHAT_MODEL = val
+
+        if 'summarization_model' in data:
+            val = data['summarization_model'].strip()
+            set_key(str(dotenv_path), "SUMMARY_MODEL", val)
+            os.environ["SUMMARY_MODEL"] = val
+            SUMMARY_MODEL = val
+
+        if 'api_key' in data:
+            val = data['api_key'].strip()
+            set_key(str(dotenv_path), "OPENROUTER_API_KEY", val)
+            os.environ["OPENROUTER_API_KEY"] = val
+            OPENROUTER_API_KEY = val
+
+        return jsonify({"success": True})
+
+
 @app.route('/shows', methods=['GET', 'POST'])
 def handle_shows():
     if request.method == 'POST':
@@ -538,8 +562,7 @@ def handle_shows():
         try:
             shows.append(json.load(open(f, 'r')))
         except Exception as e:
-            print(f"[WARN] Failed to load show {f}: {e}")
-            continue
+            pass
     return jsonify(shows)
 
 
@@ -599,8 +622,7 @@ def handle_instances():
         try:
             instances.append(json.load(open(f, 'r')))
         except Exception as e:
-            print(f"[WARN] Failed to load instance {f}: {e}")
-            continue
+            pass
     instances.sort(key=lambda x: x.get('lastPlayed', ''), reverse=True)
     return jsonify(instances)
 
@@ -639,7 +661,6 @@ def advance_episode(inst_id):
         return jsonify({"error": "Not found"}), 404
     inst = json.load(open(path, 'r'))
 
-    # Build transcript of the session
     transcript = ""
     for m in inst.get('messages', []):
         role = "USER" if m['role'] == 'user' else "STORY"
@@ -674,7 +695,6 @@ def advance_episode(inst_id):
     with open(path, 'w') as f:
         json.dump(inst, f, indent=2)
 
-    print(f"[ADVANCE] {inst_id} → Episode {inst['currentEpisodeIndex']}")
     return jsonify({
         "success": True,
         "summary": summary_text,
@@ -703,13 +723,11 @@ def chat():
     requested_model = data.get('model')
     model = requested_model if requested_model else CHAT_MODEL
 
-    # Add user message if provided (with dedup check)
     if user_input:
         should_append = True
         if inst['messages']:
             last_msg = inst['messages'][-1]
             if last_msg.get('role') == 'user' and last_msg.get('content') == user_input:
-                print(f"[DEDUP] Duplicate user message blocked")
                 should_append = False
 
         if should_append:
@@ -731,10 +749,8 @@ def chat():
                 yield f"data: {json.dumps({'token': token})}\n\n"
         except Exception as e:
             error_occurred = True
-            print(f"[STREAM ERROR] {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-        # Save assistant response
         if full_response.strip() and not error_occurred:
             try:
                 with open(path, 'r') as f:
@@ -753,9 +769,8 @@ def chat():
                 current_inst['lastPlayed'] = datetime.now().isoformat()
                 with open(path, 'w') as f:
                     json.dump(current_inst, f, indent=2)
-                print(f"[SAVED] Assistant response: {len(full_response)} chars")
             except Exception as e:
-                print(f"[SAVE ERROR] {e}")
+                pass
 
         yield "data: [DONE]\n\n"
 
@@ -771,24 +786,9 @@ def health():
     })
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                              MAIN
-# ═══════════════════════════════════════════════════════════════════════════════
-
 if __name__ == '__main__':
-    print("═" * 60)
-    print("  ROLEPLAY TERMINAL v4.0.0")
-    print("  Mode: TRANSCRIPT FIDELITY + DIALOGUE PRIORITY")
-    print(f"  Chat Model: {CHAT_MODEL}")
-    print(f"  Summary Model: {SUMMARY_MODEL}")
-    print(f"  API Key: {'Set' if OPENROUTER_API_KEY else 'NOT SET'}")
-    print("═" * 60)
-
-    # Load prompts on startup to create files if missing
     load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
     load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
     load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
     load_prompt("SUMMARY_PROMPT.txt", DEFAULT_SUMMARY_PROMPT)
-    print("[INIT] Prompt files verified")
-
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True, use_reloader=False)
