@@ -1,15 +1,33 @@
 {
   "name": "cristol",
-  "private": true,
+  "productName": "Cristol",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "main": "main.cjs",
-  "description": "Retro CRT Roleplay.",
   "scripts": {
-    "electron:dev": "vite & electron .",
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build-python": "python3 -m PyInstaller --onefile --noconsole --name api --distpath ../backend_dist ../backend/app.py",
+    "dist": "npm run build-python && npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.cristol.app",
+    "productName": "Cristol",
+    "files": [
+      "dist/**/*",
+      "main.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend_dist/api",
+        "to": "api"
+      }
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Game"
+    }
   },
   "dependencies": {
     "clsx": "2.1.1",
@@ -27,6 +45,7 @@
     "@vitejs/plugin-react": "5.1.1",
     "concurrently": "^8.2.2",
     "electron": "^40.6.1",
+    "electron-builder": "^26.8.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.2.4",
