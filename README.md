@@ -1,3 +1,5 @@
+# ◈
+
 # ◈ CRISTOL TERMINAL ◈
 ### *High-Fidelity Narrative Interface & Roleplay Backend*
 
