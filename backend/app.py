@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 """
-Roleplay Terminal Backend v4.0.0
-Transcript Fidelity + Dialogue Priority Mode
+Roleplay Terminal Backend v4.2.0
+Optimized for Instant Startup & Low Latency
 """
 
 import json
 import os
-import time
 import requests
+import threading
+import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from dotenv import load_dotenv, set_key
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                              CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
+# 1. SPEED: Disable Flask/Werkzeug startup banner logs
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 BASE_DIR = Path(__file__).parent
 dotenv_path = BASE_DIR / '.env'
 
-# Ensure .env exists before loading
-if not dotenv_path.exists():
-    dotenv_path.touch()
-
-load_dotenv(dotenv_path)
+# 2. SPEED: Fail-fast env loading
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
 
 app = Flask(__name__)
 CORS(app)
-app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB limit
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024
 
 # API Configuration
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '')
@@ -40,26 +40,24 @@ CHAT_MODEL = os.getenv('OPENROUTER_MODEL', 'anthropic/claude-sonnet-4')
 SUMMARY_MODEL = os.getenv('SUMMARY_MODEL', CHAT_MODEL)
 COST_SAVING_MODE = os.getenv('COST_SAVING_MODE', 'true').lower() in {'1', 'true', 'yes', 'on'}
 
-# Directory Setup
+# Directory Setup (Cached paths)
 DATA_DIR = BASE_DIR / 'data'
 SHOWS_DIR = DATA_DIR / 'shows'
 INSTANCES_DIR = DATA_DIR / 'instances'
 PROMPTS_DIR = BASE_DIR / 'prompts'
 
-# Ensure directories exist
-for d in [DATA_DIR, SHOWS_DIR, INSTANCES_DIR, PROMPTS_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+# 3. SPEED: Only check/create directories if strictly necessary
+for d in[DATA_DIR, SHOWS_DIR, INSTANCES_DIR, PROMPTS_DIR]:
+    if not d.exists():
+        d.mkdir(parents=True, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                        DEFAULT PROMPTS (FALLBACKS)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 DEFAULT_ANCHOR = """You are the Helluva Director. You novelize episode transcripts — the User's character is inserted into canon events as they play out.
-
 The episode transcript is YOUR SCRIPT. Copy NPC dialogue WORD-FOR-WORD. Follow events in order. The User is inserted INTO the episode. Prioritize dialogue and events over description (50%+ dialogue). Check conversation history to find where you left off.
-
 User dialogue rules: If they provide words, use EXACTLY those words, nothing more. If they don't provide words, write ZERO dialogue for them.
-
 If the transcript is exhausted, output: [Episode Complete]"""
 
 DEFAULT_SYSTEM_PROMPT = """You novelize episode transcripts. Core rules:
@@ -86,23 +84,19 @@ Style: Clinical, police-report tone.
 Content: Locations, NPCs, items, injuries, decisions, key dialogue, plot developments, unresolved threads, User character actions and NPC reactions.
 Format: Bullet-point list grouped by scene/event."""
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def load_prompt(filename, default_text):
-    """Loads a prompt from a .txt file, creating it with default if it doesn't exist."""
     path = PROMPTS_DIR / filename
     if not path.exists():
         with open(path, 'w', encoding='utf-8') as f:
             f.write(default_text)
-        print(f"[INIT] Created {filename} with default content")
         return default_text
     with open(path, 'r', encoding='utf-8') as f:
         content = f.read().strip()
     return content if content else default_text
-
 
 def get_headers():
     return {
@@ -112,14 +106,10 @@ def get_headers():
         "X-Title": "Roleplay Terminal"
     }
 
-
 def stream_openrouter(messages, model):
-    """Generates streaming tokens from OpenRouter."""
     if not OPENROUTER_API_KEY:
         yield "[Error: OPENROUTER_API_KEY not set]"
         return
-
-    print(f"[API] Model: {model} | Messages: {len(messages)}")
 
     try:
         payload = {
@@ -139,9 +129,6 @@ def stream_openrouter(messages, model):
                 timeout=120
         ) as resp:
             if resp.status_code >= 400:
-                error_text = resp.text
-                print(f"[API ERROR] Status: {resp.status_code}")
-                print(f"[API ERROR] Body: {error_text[:500]}")
                 yield f"[Error: API returned {resp.status_code}]"
                 return
 
@@ -156,7 +143,6 @@ def stream_openrouter(messages, model):
                     try:
                         data = json.loads(data_str)
                         if 'error' in data:
-                            print(f"[STREAM ERROR] {data['error']}")
                             yield f"[Error: {data['error'].get('message', 'Unknown')}]"
                             return
                         token = data.get('choices', [{}])[0].get('delta', {}).get('content', '')
@@ -164,16 +150,10 @@ def stream_openrouter(messages, model):
                             yield token
                     except json.JSONDecodeError:
                         continue
-    except requests.exceptions.Timeout:
-        print("[API] Request timed out")
-        yield "[Error: Request timed out]"
     except Exception as e:
-        print(f"[API EXCEPTION] {e}")
         yield f"[Error: {str(e)}]"
 
-
 def call_summary_api(transcript_text):
-    """Non-streaming call to summarize episode text."""
     if not OPENROUTER_API_KEY:
         return "• [Summary unavailable: No API Key]"
 
@@ -185,7 +165,7 @@ def call_summary_api(transcript_text):
             headers=get_headers(),
             json={
                 "model": SUMMARY_MODEL,
-                "messages": [
+                "messages":[
                     {"role": "system", "content": summary_prompt},
                     {"role": "user", "content": f"Summarize this session:\n\n{transcript_text}"}
                 ],
@@ -201,16 +181,15 @@ def call_summary_api(transcript_text):
     except Exception as e:
         return f"• Summary generation error: {str(e)}"
 
-
 def split_transcript_into_chunks(transcript_text, max_chars=3600):
     if not transcript_text:
         return []
-    paragraphs = [p.strip() for p in transcript_text.split("\n\n") if p.strip()]
+    paragraphs =[p.strip() for p in transcript_text.split("\n\n") if p.strip()]
     if not paragraphs:
         return [transcript_text[i:i + max_chars] for i in range(0, len(transcript_text), max_chars)]
 
     chunks = []
-    current = []
+    current =[]
     current_len = 0
     scene_markers = ("SCENE", "CUT TO", "INT.", "EXT.")
 
@@ -224,7 +203,7 @@ def split_transcript_into_chunks(transcript_text, max_chars=3600):
         else:
             for i in range(0, len(block), max_chars):
                 chunks.append(block[i:i + max_chars])
-        current = []
+        current =[]
         current_len = 0
 
     for paragraph in paragraphs:
@@ -239,10 +218,9 @@ def split_transcript_into_chunks(transcript_text, max_chars=3600):
     flush_current()
     return chunks
 
-
 def get_episode_context(instance):
     ep_idx = instance.get('currentEpisodeIndex', 0)
-    episodes = instance.get('episodes', [])
+    episodes = instance.get('episodes',[])
     ep_context = ""
     ep_name = f"Episode {ep_idx + 1}"
     if ep_idx < len(episodes):
@@ -251,12 +229,10 @@ def get_episode_context(instance):
         ep_context = current_ep.get('context', '').strip()
     return ep_idx, ep_name, ep_context
 
-
 def get_episode_chunks(instance):
     ep_idx, ep_name, ep_context = get_episode_context(instance)
     chunks = split_transcript_into_chunks(ep_context)
     return ep_idx, ep_name, ep_context, chunks
-
 
 def ensure_transcript_state(instance, chunk_count):
     ep_idx = instance.get('currentEpisodeIndex', 0)
@@ -272,35 +248,32 @@ def ensure_transcript_state(instance, chunk_count):
     current_chunk_id = max(0, current_chunk_id)
     instance['current_chunk_id'] = current_chunk_id
     progress['chunkIndex'] = current_chunk_id
-    instance.setdefault('played_segments', [])
+    instance.setdefault('played_segments',[])
     instance.setdefault('chunkSummaries', {})
     return current_chunk_id
 
-
 def get_chunk_summaries(instance, episode_index, up_to_index):
     if up_to_index <= 0:
-        return []
+        return[]
     chunk_summaries = instance.get('chunkSummaries', {})
     ep_key = str(episode_index)
     summaries = chunk_summaries.get(ep_key, [])
     return [s for s in summaries[:up_to_index] if s]
-
 
 def update_chunk_summary(instance, episode_index, chunk_index, chunk_text):
     if not chunk_text:
         return
     chunk_summaries = instance.setdefault('chunkSummaries', {})
     ep_key = str(episode_index)
-    ep_list = chunk_summaries.get(ep_key, [])
+    ep_list = chunk_summaries.get(ep_key,[])
     while len(ep_list) <= chunk_index:
         ep_list.append("")
     if not ep_list[chunk_index]:
         ep_list[chunk_index] = call_summary_api(chunk_text)
     chunk_summaries[ep_key] = ep_list
 
-
 def update_rolling_summary(instance, max_history):
-    messages = instance.get('messages', [])
+    messages = instance.get('messages',[])
     if len(messages) <= max_history:
         return
     target_count = len(messages) - max_history
@@ -319,7 +292,6 @@ def update_rolling_summary(instance, max_history):
     instance['rollingSummary'] = call_summary_api(transcript_text)
     instance['rollingSummaryCount'] = target_count
 
-
 def advance_transcript_progress(instance, episode_index, chunk_index):
     ep_idx, _, ep_context, chunks = get_episode_chunks(instance)
     if ep_idx != episode_index:
@@ -329,7 +301,7 @@ def advance_transcript_progress(instance, episode_index, chunk_index):
         instance.setdefault('transcript_progress', {})['chunkIndex'] = 0
         return
     current_chunk_index = max(0, min(chunk_index, len(chunks) - 1))
-    played_segments = instance.setdefault('played_segments', [])
+    played_segments = instance.setdefault('played_segments',[])
     if current_chunk_index not in played_segments:
         played_segments.append(current_chunk_index)
     update_chunk_summary(instance, ep_idx, current_chunk_index, chunks[current_chunk_index])
@@ -341,15 +313,8 @@ def advance_transcript_progress(instance, episode_index, chunk_index):
     progress['episodeIndex'] = ep_idx
     progress['chunkIndex'] = next_chunk
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                         PROMPT CHAIN BUILDER
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def build_prompt_chain(instance):
-    messages = []
-
-    # 1. SYSTEM MESSAGE
+    messages =[]
     anchor = load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
     system_prompt = load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
     messages.append({
@@ -357,14 +322,11 @@ def build_prompt_chain(instance):
         "content": f"{anchor}\n\n{system_prompt}"
     })
 
-    # Episode context + chunks
     ep_idx, ep_name, ep_context, chunks = get_episode_chunks(instance)
     current_chunk_id = ensure_transcript_state(instance, len(chunks))
     current_chunk = chunks[current_chunk_id] if chunks else ""
 
-    # 2. PERSISTENT CONTEXT
-    context_parts = []
-
+    context_parts =[]
     lore = instance.get('lore', '').strip()
     if lore:
         context_parts.append(f"<world_lore>\n{lore}\n</world_lore>")
@@ -374,8 +336,7 @@ def build_prompt_chain(instance):
         context_parts.append(f"<user_character>\n{profile}\n</user_character>")
 
     summaries = instance.get('summaryHistory', [])
-    is_episode_start = len(
-        [m for m in instance.get('messages', []) if m.get('role') in {'assistant', 'ai'}]
+    is_episode_start = len([m for m in instance.get('messages', []) if m.get('role') in {'assistant', 'ai'}]
     ) == 0
     if summaries and is_episode_start:
         last_summary = summaries[-1]
@@ -399,7 +360,6 @@ def build_prompt_chain(instance):
     if context_parts:
         messages.append({"role": "user", "content": "\n\n".join(context_parts)})
 
-    # 3. CURRENT TRANSCRIPT CHUNK
     if current_chunk:
         messages.append({
             "role": "user",
@@ -410,11 +370,9 @@ def build_prompt_chain(instance):
             )
         })
 
-    # 4. HISTORY
-    conv_messages = instance.get('messages', [])
+    conv_messages = instance.get('messages',[])
     max_history = 12 if not COST_SAVING_MODE else 8
-    recent_messages = conv_messages[-max_history:] if conv_messages else []
-
+    
     last_user_msg = ""
     last_user_index = None
     if conv_messages and conv_messages[-1].get('role') == 'user':
@@ -443,10 +401,8 @@ def build_prompt_chain(instance):
     if last_assistant_msg:
         messages.append({"role": "assistant", "content": last_assistant_msg})
 
-    # 5. FINAL USER MESSAGE + REINFORCEMENT
     reinforcement = load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
-
-    final_parts = []
+    final_parts =[]
 
     if last_user_msg:
         final_parts.append(f"USER ACTION/DIALOGUE:\n{last_user_msg}")
@@ -474,27 +430,6 @@ def build_prompt_chain(instance):
         "chunkCount": len(chunks)
     }
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                              INITIALIZATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-if not list(SHOWS_DIR.glob('*.json')):
-    default_show = {
-        "id": "default",
-        "name": "New Story",
-        "description": "A new adventure template.",
-        "lore": "The world is vast and unknown...",
-        "profile": "You are a traveler...",
-        "episodes": [
-            {"id": "e1", "name": "Chapter 1", "context": "The journey begins."}
-        ]
-    }
-    with open(SHOWS_DIR / "default.json", "w") as f:
-        json.dump(default_show, f, indent=2)
-    print("[INIT] Created default show")
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -502,7 +437,6 @@ if not list(SHOWS_DIR.glob('*.json')):
 @app.route('/settings', methods=['GET', 'PUT'])
 def handle_settings():
     global CHAT_MODEL, SUMMARY_MODEL, OPENROUTER_API_KEY
-
     if request.method == 'GET':
         sys_prompt = load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
         return jsonify({
@@ -514,31 +448,25 @@ def handle_settings():
 
     if request.method == 'PUT':
         data = request.json
-
         if 'system_prompt' in data:
             with open(PROMPTS_DIR / "SYSTEM_PROMPT.txt", "w", encoding="utf-8") as f:
                 f.write(data['system_prompt'].strip())
-
         if 'model' in data:
             val = data['model'].strip()
             set_key(str(dotenv_path), "OPENROUTER_MODEL", val)
             os.environ["OPENROUTER_MODEL"] = val
             CHAT_MODEL = val
-
         if 'summarization_model' in data:
             val = data['summarization_model'].strip()
             set_key(str(dotenv_path), "SUMMARY_MODEL", val)
             os.environ["SUMMARY_MODEL"] = val
             SUMMARY_MODEL = val
-
         if 'api_key' in data:
             val = data['api_key'].strip()
             set_key(str(dotenv_path), "OPENROUTER_API_KEY", val)
             os.environ["OPENROUTER_API_KEY"] = val
             OPENROUTER_API_KEY = val
-
         return jsonify({"success": True})
-
 
 @app.route('/shows', methods=['GET', 'POST'])
 def handle_shows():
@@ -551,20 +479,19 @@ def handle_shows():
             "description": data.get("description", ""),
             "lore": data.get("lore", ""),
             "profile": data.get("profile", ""),
-            "episodes": data.get("episodes", [])
+            "episodes": data.get("episodes",[])
         }
         with open(SHOWS_DIR / f"{new_id}.json", "w") as f:
             json.dump(new_show, f, indent=2)
         return jsonify(new_show)
 
-    shows = []
+    shows =[]
     for f in SHOWS_DIR.glob('*.json'):
         try:
             shows.append(json.load(open(f, 'r')))
-        except Exception as e:
+        except Exception:
             pass
     return jsonify(shows)
-
 
 @app.route('/shows/<show_id>', methods=['PUT', 'DELETE'])
 def handle_show_id(show_id):
@@ -585,7 +512,6 @@ def handle_show_id(show_id):
         json.dump(existing, f, indent=2)
     return jsonify(existing)
 
-
 @app.route('/instances', methods=['GET', 'POST'])
 def handle_instances():
     if request.method == 'POST':
@@ -601,31 +527,30 @@ def handle_instances():
             "showName": show['name'],
             "currentEpisodeIndex": 0,
             "messages": [],
-            "summaryHistory": [],
+            "summaryHistory":[],
             "transcript_progress": {"episodeIndex": 0, "chunkIndex": 0},
             "current_chunk_id": 0,
-            "played_segments": [],
+            "played_segments":[],
             "chunkSummaries": {},
             "rollingSummary": "",
             "rollingSummaryCount": 0,
             "lastPlayed": datetime.now().isoformat(),
             "lore": show.get('lore', ''),
             "profile": show.get('profile', ''),
-            "episodes": show.get('episodes', [])
+            "episodes": show.get('episodes',[])
         }
         with open(INSTANCES_DIR / f"{instance_id}.json", 'w') as f:
             json.dump(instance, f, indent=2)
         return jsonify(instance)
 
-    instances = []
+    instances =[]
     for f in INSTANCES_DIR.glob('*.json'):
         try:
             instances.append(json.load(open(f, 'r')))
-        except Exception as e:
+        except Exception:
             pass
     instances.sort(key=lambda x: x.get('lastPlayed', ''), reverse=True)
     return jsonify(instances)
-
 
 @app.route('/instances/<inst_id>', methods=['GET', 'PUT', 'DELETE'])
 def handle_instance_id(inst_id):
@@ -641,7 +566,7 @@ def handle_instance_id(inst_id):
     with open(path, 'r') as f:
         current = json.load(f)
     data = request.json
-    for key in [
+    for key in[
         'messages', 'lore', 'profile', 'currentEpisodeIndex', 'summaryHistory', 'episodes',
         'transcript_progress', 'current_chunk_id', 'played_segments', 'chunkSummaries',
         'rollingSummary', 'rollingSummaryCount'
@@ -653,6 +578,13 @@ def handle_instance_id(inst_id):
         json.dump(current, f, indent=2)
     return jsonify(current)
 
+@app.route('/summarize', methods=['POST'])
+def route_summarize():
+    data = request.get_json(silent=True) or {}
+    text = data.get('text', '')
+    if not text.strip():
+        return jsonify({"summary": "[No events recorded to summarize]"})
+    return jsonify({"summary": call_summary_api(text)})
 
 @app.route('/instances/<inst_id>/advance', methods=['POST'])
 def advance_episode(inst_id):
@@ -660,21 +592,26 @@ def advance_episode(inst_id):
     if not path.exists():
         return jsonify({"error": "Not found"}), 404
     inst = json.load(open(path, 'r'))
+    
+    data = request.get_json(silent=True) or {}
+    custom_summary = data.get('summary')
 
-    transcript = ""
-    for m in inst.get('messages', []):
-        role = "USER" if m['role'] == 'user' else "STORY"
-        transcript += f"{role}:\n{m['content']}\n\n"
-    if not transcript.strip():
-        transcript = "[No events recorded this session]"
-
-    summary_text = call_summary_api(transcript)
+    if custom_summary is not None:
+        summary_text = custom_summary.strip()
+    else:
+        transcript = ""
+        for m in inst.get('messages',[]):
+            role = "USER" if m['role'] == 'user' else "STORY"
+            transcript += f"{role}:\n{m['content']}\n\n"
+        if not transcript.strip():
+            transcript = "[No events recorded this session]"
+        summary_text = call_summary_api(transcript)
 
     ep_idx = inst.get('currentEpisodeIndex', 0)
     episodes = inst.get('episodes', [])
     ep_name = episodes[ep_idx]['name'] if ep_idx < len(episodes) else f"Episode {ep_idx + 1}"
 
-    inst.setdefault('summaryHistory', []).append({
+    inst.setdefault('summaryHistory',[]).append({
         "episodeName": ep_name,
         "summary": summary_text,
         "timestamp": datetime.now().isoformat()
@@ -686,7 +623,7 @@ def advance_episode(inst_id):
         "chunkIndex": 0
     }
     inst['current_chunk_id'] = 0
-    inst['played_segments'] = []
+    inst['played_segments'] =[]
     inst['chunkSummaries'] = inst.get('chunkSummaries', {})
     inst['rollingSummary'] = ""
     inst['rollingSummaryCount'] = 0
@@ -700,7 +637,6 @@ def advance_episode(inst_id):
         "summary": summary_text,
         "nextEpisodeIndex": inst['currentEpisodeIndex']
     })
-
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -769,13 +705,12 @@ def chat():
                 current_inst['lastPlayed'] = datetime.now().isoformat()
                 with open(path, 'w') as f:
                     json.dump(current_inst, f, indent=2)
-            except Exception as e:
+            except Exception:
                 pass
 
-        yield "data: [DONE]\n\n"
+        yield "data:[DONE]\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
-
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -785,10 +720,30 @@ def health():
         "api_key_set": bool(OPENROUTER_API_KEY)
     })
 
-
 if __name__ == '__main__':
+    # Initialize defaults
+    if not list(SHOWS_DIR.glob('*.json')):
+        default_show = {
+            "id": "default",
+            "name": "New Story",
+            "description": "A new adventure template.",
+            "lore": "The world is vast and unknown...",
+            "profile": "You are a traveler...",
+            "episodes":[{"id": "e1", "name": "Chapter 1", "context": "The journey begins."}]
+        }
+        with open(SHOWS_DIR / "default.json", "w") as f:
+            json.dump(default_show, f, indent=2)
+
     load_prompt("ANCHOR_PROMPT.txt", DEFAULT_ANCHOR)
     load_prompt("SYSTEM_PROMPT.txt", DEFAULT_SYSTEM_PROMPT)
     load_prompt("REINFORCEMENT_PROMPT.txt", DEFAULT_REINFORCEMENT)
     load_prompt("SUMMARY_PROMPT.txt", DEFAULT_SUMMARY_PROMPT)
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True, use_reloader=False)
+
+    # 4. SPEED: Run threaded, without reloader (prevents double boot)
+    app.run(
+        host='0.0.0.0', 
+        port=5000, 
+        debug=False, 
+        threaded=True, 
+        use_reloader=False 
+    )
