@@ -1,16 +1,29 @@
-package-lock.json
-node_modules
-frontend/package-lock.json
-backend/data
-backend/prompts
+# Dependencies (ignores all node_modules in root, frontend, and backend)
+node_modules/
+
+# Environment Variables (sensitive info)
 .env
-cristolicon.png
-run.sh
-__pycache__/
-*.pyc
-.DS_Store
+.env.local
+backend/.env
+
+# Local Data and Logs
+backend/data/
+backend/prompts/
 *.log
+
+# Build outputs (Standard for React/Vite/Next.js)
 dist/
 build/
-.venv/
-venv/
+.next/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+.git/
+
+cristolicon.png
+package-lock.json
+README.md
+
+output.txt
