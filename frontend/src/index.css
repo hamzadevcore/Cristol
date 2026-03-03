@@ -12,15 +12,14 @@ body {
   background: #0a0a0a;
   color: #ddd;
   font-family: var(--font-sans);
-  text-decoration: none;             /* ADD */
+  text-decoration: none;
 }
 
-/* ADD this block */
 *, *::before, *::after {
   text-decoration-line: none;
 }
 a, .prose-chat a {
-  text-decoration-line: underline;   /* preserve link underlines */
+  text-decoration-line: underline;
 }
 
 .textarea-field {
@@ -47,11 +46,9 @@ a, .prose-chat a {
   display: none;
 }
 
-/* === THEME VARIABLES === */
 :root {
   --font-editor: 'JetBrains Mono', monospace;
   --font-story: 'Courier Prime', monospace;
-
   --glow-color: rgba(168, 85, 247, 0.5);
   --glow-strong: rgba(168, 85, 247, 0.85);
   --glow-subtle: rgba(168, 85, 247, 0.12);
@@ -59,32 +56,26 @@ a, .prose-chat a {
   --accent-dim: #7c3aed;
   --bg-tint: rgba(168, 85, 247, 0.04);
   --border-color: rgba(168, 85, 247, 0.3);
-
   --bevel-light: rgba(255, 255, 255, 0.09);
   --bevel-mid: rgba(255, 255, 255, 0.04);
   --bevel-dark: rgba(0, 0, 0, 0.5);
   --bevel-darker: rgba(0, 0, 0, 0.7);
-
   --surface-0: #080808;
   --surface-1: #0e0e10;
   --surface-2: #141418;
   --surface-3: #1a1a20;
   --surface-4: #222228;
   --surface-raised: #1e1e24;
-
   --text-primary: #e0e0e8;
   --text-secondary: #8888a0;
   --text-muted: #505068;
   --text-dim: #383848;
-
   --skew: -10deg;
   --skew-inv: 10deg;
-
   --inset-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light);
   --outset-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark);
 }
 
-/* === THEMES === */
 [data-theme="green"] {
   --glow-color: rgba(34, 197, 94, 0.5);
   --glow-strong: rgba(34, 197, 94, 0.85);
@@ -159,10 +150,6 @@ a, .prose-chat a {
   --border-color: rgba(200, 0, 0, 0.4);
 }
 
-/* ===================================
-   PARALLELOGRAM SYSTEM
-   =================================== */
-
 .para { transform: skewX(var(--skew)); display: inline-flex; align-items: center; }
 .para > * { transform: skewX(var(--skew-inv)); }
 
@@ -208,10 +195,6 @@ a, .prose-chat a {
 .para-progress-seg { transform: skewX(var(--skew)); height: 6px; flex: 1; background: var(--surface-0); border: 1px solid rgba(0,0,0,0.4); box-shadow: var(--inset-shadow); }
 .para-progress-seg-fill { background: var(--accent-dim); border-color: var(--accent); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.15), 0 0 4px var(--glow-subtle); }
 
-/* ===================================
-   BEZEL SYSTEM
-   =================================== */
-
 .bezel-raised { background: var(--surface-3); border: 1px solid var(--bevel-mid); box-shadow: var(--outset-shadow), 0 2px 6px var(--bevel-darker); }
 .bezel-inset { background: var(--surface-0); border: 1px solid rgba(0,0,0,0.6); box-shadow: var(--inset-shadow), inset 0 2px 8px rgba(0,0,0,0.4); }
 .bezel-well { background: var(--surface-0); border-top: 2px solid rgba(0,0,0,0.7); border-left: 2px solid rgba(0,0,0,0.6); border-bottom: 2px solid var(--bevel-light); border-right: 2px solid var(--bevel-light); box-shadow: inset 0 2px 12px rgba(0,0,0,0.5); }
@@ -232,9 +215,6 @@ a, .prose-chat a {
 .glow-text-strong { text-shadow: 0 0 6px var(--glow-color), 0 0 14px var(--glow-color), 0 0 24px var(--glow-subtle); }
 .glow-dot { box-shadow: 0 0 4px var(--glow-color), 0 0 10px var(--glow-color); }
 
-/* ===================================
-   BUTTONS
-   =================================== */
 .btn { background: var(--surface-4); border: 1px solid rgba(255,255,255,0.06); padding: 6px 14px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--text-secondary); cursor: pointer; box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark), 0 1px 3px rgba(0,0,0,0.4); transition: all 0.12s ease; text-transform: uppercase; }
 .btn:hover { color: var(--text-primary); background: var(--surface-raised); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.12), inset -1px -1px 0 var(--bevel-dark), 0 0 8px var(--glow-subtle), 0 2px 6px rgba(0,0,0,0.5); }
 .btn:active, .btn-pressed { box-shadow: inset -1px -1px 0 var(--bevel-light), inset 1px 1px 0 var(--bevel-dark), inset 0 2px 6px rgba(0,0,0,0.4); transform: translateY(1px); }
@@ -246,9 +226,6 @@ a, .prose-chat a {
 .btn-ghost:hover { background: var(--surface-3); border-color: rgba(255,255,255,0.06); box-shadow: var(--outset-shadow); }
 .btn-sm { padding: 3px 8px; font-size: 10px; }
 
-/* ===================================
-   CLOSE BUTTON
-   =================================== */
 .close-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: var(--surface-4); border: 1px solid rgba(255,255,255,0.06); box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark), 0 1px 2px rgba(0,0,0,0.4); transition: all 0.15s ease; color: var(--text-muted); }
 .close-btn:hover { color: #ef4444; background: var(--surface-raised); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.1), inset -1px -1px 0 var(--bevel-dark), 0 0 6px rgba(239,68,68,0.15), 0 1px 3px rgba(0,0,0,0.5); }
 .close-btn:active { box-shadow: inset -1px -1px 0 var(--bevel-light), inset 1px 1px 0 var(--bevel-dark), inset 0 1px 4px rgba(0,0,0,0.4); transform: translateY(1px); }
@@ -256,9 +233,6 @@ a, .prose-chat a {
 .close-btn-lg { width: 32px; height: 32px; }
 .close-btn-lg svg { width: 14px; height: 14px; }
 
-/* ===================================
-   INPUTS & TYPOGRAPHY
-   =================================== */
 .input-field {
   background: var(--surface-0);
   border: 1px solid rgba(0,0,0,0.5);
@@ -291,7 +265,6 @@ a, .prose-chat a {
 .input-mono { font-family: var(--font-mono); font-size: 13px; }
 .font-editor { font-family: var(--font-editor) !important; }
 
-/* Story format text areas (Lore, Context, Profile) */
 .font-story {
   font-family: var(--font-story) !important;
   font-size: 14.5px;
@@ -301,51 +274,35 @@ a, .prose-chat a {
 .select-field { background: var(--surface-0); border: 1px solid rgba(0,0,0,0.5); padding: 9px 32px 9px 12px; font-size: 13px; color: var(--text-primary); outline: none; cursor: pointer; font-family: var(--font-mono); appearance: none; box-shadow: var(--inset-shadow), inset 0 2px 6px rgba(0,0,0,0.3); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; transition: border-color 0.15s ease; }
 .select-field:focus { border-color: var(--accent-dim); }
 
-/* ===================================
-   TOGGLE
-   =================================== */
 .toggle-switch { width: 40px; height: 22px; background: var(--surface-0); border: 1px solid rgba(0,0,0,0.5); cursor: pointer; position: relative; box-shadow: var(--inset-shadow), inset 0 2px 4px rgba(0,0,0,0.4); transition: all 0.2s ease; }
 .toggle-switch::after { content: ''; width: 16px; height: 16px; background: var(--surface-4); border: 1px solid rgba(255,255,255,0.06); position: absolute; top: 2px; left: 2px; box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark), 0 1px 2px rgba(0,0,0,0.3); transition: all 0.2s ease; }
 .toggle-switch.active { background: var(--accent-dim); border-color: var(--accent); box-shadow: inset 0 1px 3px rgba(0,0,0,0.3), 0 0 6px var(--glow-subtle); }
 .toggle-switch.active::after { transform: translateX(18px); background: white; border-color: rgba(255,255,255,0.3); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.4), inset -1px -1px 0 rgba(0,0,0,0.1), 0 0 4px rgba(255,255,255,0.3); }
 
-/* ===================================
-   CARDS & BADGES
-   =================================== */
 .card { background: var(--surface-2); border: 1px solid rgba(255,255,255,0.04); box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark), 0 2px 6px rgba(0,0,0,0.4); overflow: hidden; transition: all 0.15s ease; position: relative; }
 .card:hover { border-color: rgba(255,255,255,0.08); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.1), inset -1px -1px 0 var(--bevel-dark), 0 0 8px var(--glow-subtle), 0 3px 8px rgba(0,0,0,0.5); }
 .card-active { border-color: var(--accent) !important; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.1), inset -1px -1px 0 var(--bevel-dark), 0 0 10px var(--glow-color), 0 3px 8px rgba(0,0,0,0.5) !important; }
 
 .badge { display: inline-flex; align-items: center; padding: 1px 7px; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: var(--surface-0); color: var(--accent); border: 1px solid rgba(0,0,0,0.4); box-shadow: var(--inset-shadow); }
 
-/* ===================================
-   SCROLLBAR
-   =================================== */
 .custom-scrollbar::-webkit-scrollbar { width: 10px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: var(--surface-0); border-left: 1px solid rgba(0,0,0,0.4); box-shadow: inset 1px 0 3px rgba(0,0,0,0.3); }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--surface-4); border: 1px solid rgba(255,255,255,0.04); box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark); }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--surface-raised); }
 .custom-scrollbar::-webkit-scrollbar-button { display: none; }
 
-/* ===================================
-   PROSE
-   =================================== */
 .prose-chat { font-family: var(--font-sans); font-size: 15px; line-height: 1.75; color: var(--text-primary); font-weight: 400; }
 .prose-chat p { margin-bottom: 0.75em; }
 .prose-chat strong { color: var(--text-primary); font-weight: 600; }
-.prose-chat em {
-  color: var(--text-primary);
-}
+.prose-chat em { color: var(--text-primary); }
 .prose-chat code { background: var(--surface-0); padding: 2px 5px; font-family: var(--font-mono); font-size: 0.85em; border: 1px solid rgba(0,0,0,0.4); box-shadow: var(--inset-shadow); }
 .prose-chat pre { background: var(--surface-0); border: 1px solid rgba(0,0,0,0.4); padding: 14px; overflow-x: auto; box-shadow: var(--inset-shadow), inset 0 2px 6px rgba(0,0,0,0.3); }
 .prose-chat blockquote { border-left: 3px solid var(--accent-dim); padding-left: 14px; color: var(--text-secondary); font-style: italic; }
 .prose-chat h1, .prose-chat h2, .prose-chat h3 { color: var(--text-primary); font-weight: 600; margin-top: 1.5em; margin-bottom: 0.5em; }
 .prose-chat ul, .prose-chat ol { padding-left: 1.5em; }
 .prose-chat li { margin-bottom: 0.25em; }
+.prose-chat { clear: right; }
 
-/* ===================================
-   ANIMATIONS
-   =================================== */
 @keyframes flicker-overlay { 0% { opacity: 0.01; } 5% { opacity: 0.03; } 10% { opacity: 0.01; } 15% { opacity: 0.04; } 20% { opacity: 0.01; } 50% { opacity: 0.01; } 55% { opacity: 0.03; } 60% { opacity: 0.01; } 100% { opacity: 0.01; } }
 @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
@@ -371,6 +328,35 @@ a, .prose-chat a {
 
 .modal-backdrop { background: rgba(0, 0, 0, 0.88); }
 
-.prose-chat {
-  clear: right;
+.title-bar {
+  height: 36px;
+  background: var(--surface-2);
+  border-bottom: 1px solid rgba(0,0,0,0.6);
+  box-shadow: inset 0 1px 0 var(--bevel-light), 0 1px 3px rgba(0,0,0,0.3);
+  position: relative;
+  overflow: hidden;
+  z-index: 60;
 }
+.title-bar::before { content: ''; position: absolute; left: -6px; top: 0; bottom: 0; width: 30px; background: var(--accent-dim); transform: skewX(var(--skew)); opacity: 0.08; }
+.title-bar::after { content: ''; position: absolute; left: 18px; top: 0; bottom: 0; width: 4px; background: var(--accent); transform: skewX(var(--skew)); opacity: 0.2; box-shadow: 0 0 6px var(--glow-subtle); }
+
+.title-bar-drag { -webkit-app-region: drag; }
+.title-bar-controls { -webkit-app-region: no-drag; }
+.title-bar-controls .para-btn { -webkit-app-region: no-drag; }
+
+.traffic-lights { display: flex; align-items: center; gap: 8px; padding-left: 8px; -webkit-app-region: no-drag; }
+.traffic-light { width: 13px; height: 13px; border-radius: 50%; border: none; cursor: pointer; padding: 0; transition: all 0.15s ease; -webkit-app-region: no-drag; }
+.traffic-light:active { transform: scale(0.85); }
+.traffic-light-minimize { background: #febc2e; border: 1px solid #dfa123; box-shadow: 0 0 1px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.25); }
+.traffic-light-minimize:hover { background: #f5a623; box-shadow: 0 0 6px rgba(245, 166, 35, 0.4), inset 0 1px 1px rgba(255,255,255,0.3); }
+.traffic-light-maximize { background: #28c840; border: 1px solid #1aab29; box-shadow: 0 0 1px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.25); }
+.traffic-light-maximize:hover { background: #1db934; box-shadow: 0 0 6px rgba(40, 200, 64, 0.4), inset 0 1px 1px rgba(255,255,255,0.3); }
+.traffic-light-close { background: #ff5f57; border: 1px solid #e0443e; box-shadow: 0 0 1px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.25); }
+.traffic-light-close:hover { background: #ff3b30; box-shadow: 0 0 6px rgba(255, 59, 48, 0.4), inset 0 1px 1px rgba(255,255,255,0.3); }
+
+.window-ctrl { width: 30px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: var(--surface-4); border: 1px solid rgba(255,255,255,0.04); color: var(--text-muted); transform: skewX(var(--skew)); box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-dark), 0 1px 2px rgba(0,0,0,0.3); transition: all 0.12s ease; -webkit-app-region: no-drag; }
+.window-ctrl > * { transform: skewX(var(--skew-inv)); transition: transform 0.3s ease, color 0.12s ease; }
+.window-ctrl:hover { color: var(--text-primary); background: var(--surface-raised); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.1), inset -1px -1px 0 var(--bevel-dark), 0 0 6px var(--glow-subtle), 0 1px 3px rgba(0,0,0,0.4); }
+.window-ctrl:active { box-shadow: inset -1px -1px 0 var(--bevel-light), inset 1px 1px 0 var(--bevel-dark), inset 0 1px 4px rgba(0,0,0,0.4); transform: skewX(var(--skew)) translateY(1px); }
+.window-ctrl-util:hover { color: var(--accent); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.1), inset -1px -1px 0 var(--bevel-dark), 0 0 8px var(--glow-subtle), 0 1px 3px rgba(0,0,0,0.4); }
+.window-ctrl-util:hover > div { transform: skewX(var(--skew-inv)) rotate(90deg); }
