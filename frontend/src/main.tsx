@@ -72,7 +72,13 @@ export class APIService {
       while (true) {
         const { done, value } = await reader.read(); if (done) break;
         buf += dec.decode(value, { stream: true }); const lines = buf.split('\n'); buf = lines.pop() || '';
-        for (const l of lines) { if (l.startsWith('data: ')) { const d = l.slice(6); if (d === '[DONE]') return; try { const p = JSON.parse(d); if (p.token) yield p.token; } catch { yield d; } } }
+        for (const l of lines) { 
+          if (l.startsWith('data: ')) { 
+            const d = l.slice(6); 
+            if (d.trim() === '[DONE]') return; 
+            try { const p = JSON.parse(d); if (p.token !== undefined) yield p.token; } catch { yield d; } 
+          } 
+        }
       }
     } catch (e) { if ((e as Error).name === 'AbortError') return; throw e; } finally { this.ac = null; }
   }
@@ -155,13 +161,58 @@ export function appReducer(state: AppState, action: Action): AppState {
     case 'SET_EDITING_SHOW': return { ...state, editingShow: action.payload };
     case 'SET_INSTANCES': return { ...state, instances: action.payload };
     case 'ADD_INSTANCE': return { ...state, instances:[action.payload, ...state.instances] };
-    case 'UPDATE_INSTANCE': return { ...state, instances: state.instances.map(i => i.id === action.payload.id ? action.payload : i), currentInstance: state.currentInstance?.id === action.payload.id ? action.payload : state.currentInstance, lore: state.currentInstance?.id === action.payload.id ? action.payload.lore : state.lore, profile: state.currentInstance?.id === action.payload.id ? action.payload.profile : state.profile };
+    case 'UPDATE_INSTANCE': {
+      const isCurrent = state.currentInstance?.id === action.payload.id;
+      return { 
+        ...state, 
+        instances: state.instances.map(i => i.id === action.payload.id ? action.payload : i), 
+        currentInstance: isCurrent ? action.payload : state.currentInstance, 
+        lore: isCurrent ? action.payload.lore : state.lore, 
+        profile: isCurrent ? action.payload.profile : state.profile,
+        messages: isCurrent ? action.payload.messages : state.messages
+      };
+    }
     case 'REMOVE_INSTANCE': return { ...state, instances: state.instances.filter(i => i.id !== action.payload), currentInstance: state.currentInstance?.id === action.payload ? null : state.currentInstance };
     case 'SET_CURRENT_INSTANCE': return { ...state, currentInstance: action.payload, messages: action.payload ? action.payload.messages :[], lore: action.payload ? action.payload.lore : '', profile: action.payload ? action.payload.profile : '' };
-    case 'ADD_MESSAGE': { const m =[...state.messages, action.payload]; if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); return { ...state, messages: m }; }
-    case 'UPDATE_MESSAGE': { const m = state.messages.map(x => x.id === action.payload.id ? { ...x, content: action.payload.content } : x); if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); return { ...state, messages: m }; }
-    case 'DELETE_MESSAGE': { const m = state.messages.filter(x => x.id !== action.payload); if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); return { ...state, messages: m }; }
-    case 'SET_MESSAGES': { if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: action.payload }); return { ...state, messages: action.payload }; }
+    case 'ADD_MESSAGE': { 
+      const m =[...state.messages, action.payload]; 
+      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); 
+      return { 
+        ...state, 
+        messages: m,
+        currentInstance: state.currentInstance ? { ...state.currentInstance, messages: m } : null,
+        instances: state.instances.map(i => i.id === state.currentInstance?.id ? { ...i, messages: m } : i)
+      }; 
+    }
+    case 'UPDATE_MESSAGE': { 
+      const m = state.messages.map(x => x.id === action.payload.id ? { ...x, content: action.payload.content } : x); 
+      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); 
+      return { 
+        ...state, 
+        messages: m,
+        currentInstance: state.currentInstance ? { ...state.currentInstance, messages: m } : null,
+        instances: state.instances.map(i => i.id === state.currentInstance?.id ? { ...i, messages: m } : i)
+      }; 
+    }
+    case 'DELETE_MESSAGE': { 
+      const m = state.messages.filter(x => x.id !== action.payload); 
+      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: m }); 
+      return { 
+        ...state, 
+        messages: m,
+        currentInstance: state.currentInstance ? { ...state.currentInstance, messages: m } : null,
+        instances: state.instances.map(i => i.id === state.currentInstance?.id ? { ...i, messages: m } : i)
+      }; 
+    }
+    case 'SET_MESSAGES': { 
+      if (state.currentInstance) api.updateInstance(state.currentInstance.id, { messages: action.payload }); 
+      return { 
+        ...state, 
+        messages: action.payload,
+        currentInstance: state.currentInstance ? { ...state.currentInstance, messages: action.payload } : null,
+        instances: state.instances.map(i => i.id === state.currentInstance?.id ? { ...i, messages: action.payload } : i)
+      }; 
+    }
     case 'SET_GENERATING': return { ...state, isGenerating: action.payload };
     case 'SET_STREAMING_TEXT': return { ...state, streamingText: action.payload };
     case 'UPDATE_TOKEN_USAGE': return { ...state, tokenUsage: { prompt: action.payload.prompt, response: action.payload.response, total: state.tokenUsage.total + action.payload.prompt + action.payload.response } };
@@ -208,7 +259,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     poll();
     return () => { cancelled = true; clearTimeout(timer); };
-  },[state.settings.backendUrl]); // Re-poll if URL changes
+  },[state.settings.backendUrl]); 
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings: state.settings }));
@@ -232,17 +283,12 @@ declare global {
   }
 }
 
-const isElectron = !!window.electronAPI;
-
 // === ICONS ===
 function CloseIcon({ size = 12 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>; }
 function SettingsIcon({ size = 16 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>; }
-function MinimizeIcon({ size = 10 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>; }
-function MaximizeIcon({ size = 10 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" /></svg>; }
-function RestoreIcon({ size = 10 }: { size?: number }) { return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="8" width="12" height="12" /><polyline points="8 8 8 4 20 4 20 16 16 16" /></svg>; }
 
 // === SMALL COMPONENTS ===
-function CloseButton({ onClick, large }: { onClick: () => void; large?: boolean }) { return <button onClick={onClick} className={cn("close-btn", large && "close-btn-lg")} aria-label="Close"><CloseIcon size={large ? 14 : 12} /></button>; }
+function CloseButton({ onClick, large }: { onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; large?: boolean }) { return <button onClick={onClick} className={cn("close-btn", large && "close-btn-lg")} aria-label="Close"><CloseIcon size={large ? 14 : 12} /></button>; }
 function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) { return <button onClick={() => !disabled && onChange(!checked)} className={cn("toggle-switch", checked && "active", disabled && "opacity-30 cursor-not-allowed")} role="switch" aria-checked={checked} />; }
 
 function ParaDivider() {
@@ -280,7 +326,16 @@ function CRTOverlay() {
 }
 
 // === CUSTOM CONFIRM MODAL ===
-export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, confirmText = "CONFIRM", cancelText = "CANCEL", isDanger = false }: any) {
+export function ConfirmModal({ isOpen, title, message, onConfirm, onCancel, confirmText = "CONFIRM", cancelText = "CANCEL", isDanger = false }: {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmText?: string;
+  cancelText?: string;
+  isDanger?: boolean;
+}) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
@@ -317,7 +372,7 @@ export function EditShowModal({ isOpen, onClose, show }: { isOpen: boolean; onCl
   useEffect(() => {
     if (isOpen) {
       if (show) { setName(show.name); setDescription(show.description); setLore(show.lore); setProfile(show.profile); setEpisodes(show.episodes); if (show.episodes.length > 0) setSelEpId(show.episodes[0].id); }
-      else { setName('New Campaign'); setDescription('A new adventure...'); setLore('The world is vast...'); setProfile('You are a traveler...'); const e = { id: Date.now().toString(), name: 'Chapter 1', context: 'You start here.' }; setEpisodes([e]); setSelEpId(e.id); }
+      else { setName('New Campaign'); setDescription('A new adventure...'); setLore('The world is vast...'); setProfile('You are a traveler...'); const e = { id: Date.now().toString() + Math.random().toString().slice(2, 6), name: 'Chapter 1', context: 'You start here.' }; setEpisodes([e]); setSelEpId(e.id); }
       setActiveTab('general'); setIsSaving(false); setErr(null); setImportText(''); setPendingImport(null);
     }
   },[isOpen, show]);
@@ -398,7 +453,7 @@ export function EditShowModal({ isOpen, onClose, show }: { isOpen: boolean; onCl
                 <span className="text-[9px] font-bold tracking-[0.2em] text-engrave" style={{ color: 'var(--text-dim)' }}>CHAPTERS ({episodes.length})</span>
                 <div className="flex gap-1">
                   <button onClick={() => setActiveTab('import')} className={cn("para-btn para-btn-sm", activeTab === 'import' && "para-tab-active")}><span>IMP</span></button>
-                  <button onClick={() => { const e = { id: Date.now().toString(), name: 'New Chapter', context: '' }; setEpisodes([...episodes, e]); setSelEpId(e.id); setActiveTab('episodes'); }} className="para-btn para-btn-sm"><span>+</span></button>
+                  <button onClick={() => { const e = { id: Date.now().toString() + Math.random().toString().slice(2, 6), name: 'New Chapter', context: '' }; setEpisodes([...episodes, e]); setSelEpId(e.id); setActiveTab('episodes'); }} className="para-btn para-btn-sm"><span>+</span></button>
                 </div>
               </div>
             </div>
@@ -514,9 +569,10 @@ export function InjectSummaryModal({ isOpen, onClose }: { isOpen: boolean; onClo
   if (!isOpen || !state.currentInstance) return null;
 
   const handleSave = async () => {
+    if (!state.currentInstance) return;
     setLoading(true);
     try {
-      const newHist =[...state.currentInstance.summaryHistory, { episodeName: 'Injected Context', summary: text, timestamp: new Date().toISOString() }];
+      const newHist =[...(state.currentInstance.summaryHistory || []), { episodeName: 'Injected Context', summary: text, timestamp: new Date().toISOString() }];
       const updated = await api.updateInstance(state.currentInstance.id, { summaryHistory: newHist });
       dispatch({ type: 'UPDATE_INSTANCE', payload: updated });
       onClose();
@@ -570,11 +626,19 @@ export function FinishEpisodeModal({ isOpen, onClose }: { isOpen: boolean; onClo
   };
 
   const handleAdvance = async () => {
+    if (!state.currentInstance) return;
     setLoading(true);
     try {
       const r = await api.advanceInstance(state.currentInstance.id, state.messages, state.settings.model, summary);
-      if (r.success) {
-        dispatch({ type: 'UPDATE_INSTANCE', payload: { ...state.currentInstance, currentEpisodeIndex: state.currentInstance.currentEpisodeIndex + 1, messages:[], summaryHistory:[...state.currentInstance.summaryHistory, { episodeName: ep.name, summary: r.summary, timestamp: new Date().toISOString() }] } });
+      if (r.success || r) {
+        const newHist = [...(state.currentInstance.summaryHistory || []), { episodeName: ep.name, summary: summary, timestamp: new Date().toISOString() }];
+        const newInstance = { 
+          ...state.currentInstance, 
+          currentEpisodeIndex: state.currentInstance.currentEpisodeIndex + 1, 
+          messages: [], 
+          summaryHistory: newHist 
+        };
+        dispatch({ type: 'UPDATE_INSTANCE', payload: newInstance });
         onClose();
       }
     } catch {} finally { setLoading(false); }
@@ -741,7 +805,14 @@ export function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: (
 }
 
 // === CHAT MESSAGE ===
-function ChatMessage({ message, isStreaming, streamingText, onEdit, onDelete, onRegenerate }: any) {
+function ChatMessage({ message, isStreaming, streamingText, onEdit, onDelete, onRegenerate }: {
+  message: Message | { id: string; role: string; content: string };
+  isStreaming: boolean;
+  streamingText: string;
+  onEdit: (id: string, content: string) => void;
+  onDelete: (id: string) => void;
+  onRegenerate: (id: string) => void;
+}) {
   const[editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const content = isStreaming ? streamingText : message.content;
@@ -835,16 +906,18 @@ function Sidebar() {
                             {currentIdx >= epCount ? <div className="para-badge-glow para-badge"><span>COMPLETE</span></div> : `Ep ${currentIdx + 1}: ${inst.episodes[currentIdx]?.name}`}
                           </div>
                           {currentIdx < epCount && <div className="mt-2"><ParaProgress current={currentIdx + 1} total={epCount} /></div>}
-                          <div className="text-[9px] font-mono mt-1" style={{ color: 'var(--text-dim)' }}>{new Date(inst.lastPlayed).toLocaleDateString()}</div>
+                          <div className="text-[9px] font-mono mt-1" style={{ color: 'var(--text-dim)' }}>{inst.lastPlayed ? new Date(inst.lastPlayed).toLocaleDateString() : 'Unknown Date'}</div>
                         </div>
-                        <button onClick={e => {
-                          e.stopPropagation();
-                          setConfirmState({
-                            title: 'DELETE SAVE',
-                            message: `Are you sure you want to delete "${inst.showName}"?`,
-                            action: () => { api.deleteInstance(inst.id); dispatch({ type: 'REMOVE_INSTANCE', payload: inst.id }); }
-                          });
-                        }} className="opacity-0 group-hover:opacity-100 transition-opacity"><CloseButton onClick={() => {}} /></button>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <CloseButton onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmState({
+                              title: 'DELETE SAVE',
+                              message: `Are you sure you want to delete "${inst.showName}"?`,
+                              action: () => { api.deleteInstance(inst.id); dispatch({ type: 'REMOVE_INSTANCE', payload: inst.id }); }
+                            });
+                          }} />
+                        </div>
                       </div>
                     </div>
                   );
@@ -862,14 +935,16 @@ function Sidebar() {
                         <div className="text-[12px] font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{show.name}</div>
                         <div className="text-[9px] font-mono mt-1" style={{ color: 'var(--text-dim)' }}>{show.episodes.length} chapters</div>
                       </div>
-                      <button onClick={e => {
-                        e.stopPropagation();
-                        setConfirmState({
-                          title: 'DELETE BLUEPRINT',
-                          message: `Are you sure you want to delete blueprint "${show.name}"?`,
-                          action: () => { api.deleteShow(show.id); dispatch({ type: 'REMOVE_SHOW', payload: show.id }); }
-                        });
-                      }} className="opacity-0 group-hover:opacity-100 transition-opacity"><CloseButton onClick={() => {}} /></button>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <CloseButton onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmState({
+                            title: 'DELETE BLUEPRINT',
+                            message: `Are you sure you want to delete blueprint "${show.name}"?`,
+                            action: () => { api.deleteShow(show.id); dispatch({ type: 'REMOVE_SHOW', payload: show.id }); }
+                          });
+                        }} />
+                      </div>
                     </div>
                     <div className="flex gap-1.5 mt-3 relative z-10">
                       <button onClick={() => dispatch({ type: 'SET_EDITING_SHOW', payload: show })} className="para-btn para-btn-sm flex-1"><span>EDIT</span></button>
@@ -924,11 +999,29 @@ export function ChatArea() {
   const handleRegenerate = useCallback((id: string) => {
     if (state.isGenerating || !state.currentInstance) return;
     const idx = state.messages.findIndex(m => m.id === id); if (idx === -1) return;
-    const msg = state.messages[idx]; let nm; let lum = '';
-    if (msg.role === 'ai') { nm = state.messages.slice(0, idx); const ui = [...nm].reverse().findIndex(m => m.role === 'user'); if (ui !== -1) lum = nm[nm.length - 1 - ui].content; }
-    else { nm = state.messages.slice(0, idx + 1); lum = msg.content; }
+    
+    let nm;
+    const msg = state.messages[idx]; 
+    if (msg.role === 'ai') { 
+      nm = state.messages.slice(0, idx); 
+    } else { 
+      nm = state.messages.slice(0, idx + 1); 
+    }
+
+    const ui = [...nm].reverse().findIndex(m => m.role === 'user');
+    let lum = '';
+    let hist: any[] = [];
+    
+    if (ui !== -1) { 
+      const actualUi = nm.length - 1 - ui;
+      lum = nm[actualUi].content;
+      hist = nm.slice(0, actualUi).map(m => ({ role: m.role, content: m.content }));
+    } else {
+      hist = nm.map(m => ({ role: m.role, content: m.content }));
+    }
+
     dispatch({ type: 'SET_MESSAGES', payload: nm });
-    setTimeout(() => sendToAPI(lum, nm.map(m => ({ role: m.role, content: m.content }))), 100);
+    setTimeout(() => sendToAPI(lum, hist), 100);
   },[state.isGenerating, state.currentInstance, state.messages, dispatch, sendToAPI]);
 
   const handleSend = () => { if (!input.trim() || state.isGenerating || !state.currentInstance) return; playMessageSent(); atBottom.current = true; const m = input.trim(); setInput(''); dispatch({ type: 'ADD_MESSAGE', payload: { id: Date.now().toString(), role: 'user', content: m } }); setTimeout(() => sendToAPI(m), 100); };
@@ -1014,7 +1107,7 @@ export function ChatArea() {
   );
 }
 
-function TitleBar({ onOpenSettings, onFinishEpisode }: any) {
+function TitleBar({ onOpenSettings, onFinishEpisode }: { onOpenSettings: () => void; onFinishEpisode: () => void; }) {
   const { state } = useApp();
   const[isMaximized, setIsMaximized] = useState(false);
 
